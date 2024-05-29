@@ -1,4 +1,4 @@
-import { type NodePath, type BabelTypes } from "./babel"
+import { type NodePath, type BabelTypes } from "./babel-esm"
 
 export function fromFunction(
   path: NodePath<

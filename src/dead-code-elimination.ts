@@ -6,7 +6,7 @@ import {
   type NodePath,
   type BabelTypes,
   type ParseResult,
-} from "./babel"
+} from "./babel-esm"
 import * as Identifier from "./identifier"
 
 type IdentifierPath = NodePath<BabelTypes.Identifier>
