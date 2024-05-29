@@ -1,6 +1,6 @@
 # babel-dead-code-elimination
 
-Composable primitives for dead code elimination primitives in Babel
+Composable primitives for dead code elimination in Babel
 
 This package is **not a Babel plugin**, but rather a set of composable primitives to author your own Babel transforms and plugins.
 
