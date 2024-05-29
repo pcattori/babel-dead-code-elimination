@@ -6,12 +6,10 @@ import {
 } from "./babel-esm"
 import * as Identifier from "./identifier"
 
-type IdentifierPath = NodePath<BabelTypes.Identifier>
-
 export default function (
   ast: ParseResult<BabelTypes.File>
-): Set<IdentifierPath> {
-  const referenced = new Set<IdentifierPath>()
+): Set<Identifier.Path> {
+  const referenced = new Set<Identifier.Path>()
 
   function markFunction(
     path: NodePath<

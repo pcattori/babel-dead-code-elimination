@@ -9,18 +9,16 @@ import {
 } from "./babel-esm"
 import * as Identifier from "./identifier"
 
-type IdentifierPath = NodePath<BabelTypes.Identifier>
-
 /**
  * @param candidates - If provided, only these identifiers will be candidates for dead code elimination.
  */
 export default function (
   ast: ParseResult<BabelTypes.File>,
-  candidates?: Set<IdentifierPath>
+  candidates?: Set<Identifier.Path>
 ) {
   let referencesRemovedInThisPass: number
 
-  let shouldBeRemoved = (ident: IdentifierPath) => {
+  let shouldBeRemoved = (ident: Identifier.Path) => {
     if (Identifier.isReferenced(ident)) return false
     if (!candidates) return true
     return candidates.has(ident)

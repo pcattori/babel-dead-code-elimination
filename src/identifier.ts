@@ -1,5 +1,7 @@
 import { type NodePath, type BabelTypes } from "./babel-esm"
 
+export type Path = NodePath<BabelTypes.Identifier>
+
 export function fromFunction(
   path: NodePath<
     | BabelTypes.FunctionDeclaration
@@ -32,6 +34,7 @@ export function fromFunction(
     ? (path.get("id") as NodePath<BabelTypes.Identifier>)
     : null
 }
+
 export function isReferenced(ident: NodePath<BabelTypes.Identifier>): boolean {
   let binding = ident.scope.getBinding(ident.node.name)
   if (binding?.referenced) {
