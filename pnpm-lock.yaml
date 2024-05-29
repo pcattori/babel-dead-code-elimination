@@ -11,9 +11,6 @@ importers:
       '@babel/core':
         specifier: ^7.23.7
         version: 7.24.6
-      '@babel/generator':
-        specifier: ^7.23.6
-        version: 7.24.6
       '@babel/parser':
         specifier: ^7.23.6
         version: 7.24.6
@@ -24,6 +21,9 @@ importers:
         specifier: ^7.23.6
         version: 7.24.6
     devDependencies:
+      '@babel/generator':
+        specifier: ^7.23.6
+        version: 7.24.6
       '@changesets/cli':
         specifier: ^2.27.2
         version: 2.27.5
