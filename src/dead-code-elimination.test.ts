@@ -3,7 +3,9 @@ import { parse } from "@babel/parser"
 import generate from "@babel/generator"
 import dedent from "dedent"
 
+import { traverse } from "./babel-esm"
 import deadCodeElimination from "./dead-code-elimination"
+import findReferencedIdentifiers from "./find-referenced-identifiers"
 
 let dce = (source: string): string => {
   let ast = parse(source, { sourceType: "module" })
@@ -180,4 +182,30 @@ test("repeated elimination", () => {
     console.log("k");
   `
   expect(dce(source)).toBe(expected)
+})
+
+test("only eliminates newly unreferenced identifiers", () => {
+  let source = dedent`
+    let alwaysUnreferenced = 1
+
+    let newlyUnreferenced = 2
+    export default newlyUnreferenced
+
+    let alwaysReferenced = 3
+    console.log(alwaysReferenced)
+  `
+
+  let ast = parse(source, { sourceType: "module" })
+  let referenced = findReferencedIdentifiers(ast)
+  traverse(ast, {
+    ExportDefaultDeclaration(path) {
+      path.remove()
+    },
+  })
+  deadCodeElimination(ast, referenced)
+  expect(generate(ast).code).toBe(dedent`
+    let alwaysUnreferenced = 1;
+    let alwaysReferenced = 3;
+    console.log(alwaysReferenced);
+  `)
 })
