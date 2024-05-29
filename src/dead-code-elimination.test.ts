@@ -5,29 +5,29 @@ import dedent from "dedent"
 
 import deadCodeElimination from "./dead-code-elimination"
 
-const dce = (source: string): string => {
+let dce = (source: string): string => {
   let ast = parse(source, { sourceType: "module" })
   deadCodeElimination(ast)
   return generate(ast).code
 }
 
 test("import:side-effect", () => {
-  const source = dedent`
+  let source = dedent`
     import "side-effect"
   `
-  const expected = dedent`
+  let expected = dedent`
     import "side-effect";
   `
   expect(dce(source)).toBe(expected)
 })
 
 test("import:named", () => {
-  const source = dedent`
+  let source = dedent`
     import { a, _b } from "named"
     import { _c } from "named-unused"
     console.log(a)
   `
-  const expected = dedent`
+  let expected = dedent`
     import { a } from "named";
     console.log(a);
   `
@@ -35,12 +35,12 @@ test("import:named", () => {
 })
 
 test("import:default", () => {
-  const source = dedent`
+  let source = dedent`
     import a from "default-used"
     import _b from "default-unused"
     console.log(a)
   `
-  const expected = dedent`
+  let expected = dedent`
     import a from "default-used";
     console.log(a);
   `
@@ -48,12 +48,12 @@ test("import:default", () => {
 })
 
 test("import:namespace", () => {
-  const source = dedent`
+  let source = dedent`
     import * as a from "namespace-used"
     import * as _b from "namespace-unused"
     console.log(a)
   `
-  const expected = dedent`
+  let expected = dedent`
     import * as a from "namespace-used";
     console.log(a);
   `
@@ -61,7 +61,7 @@ test("import:namespace", () => {
 })
 
 test("function:declaration", () => {
-  const source = dedent`
+  let source = dedent`
     export function a() {
       return
     }
@@ -69,7 +69,7 @@ test("function:declaration", () => {
       return
     }
   `
-  const expected = dedent`
+  let expected = dedent`
     export function a() {
       return;
     }
@@ -78,16 +78,16 @@ test("function:declaration", () => {
 })
 
 test("function:expression", () => {
-  const source = dedent`
-    export const a = function () {
+  let source = dedent`
+    export let a = function () {
       return
     }
-    const _b = function () {
+    let _b = function () {
       return
     }
   `
-  const expected = dedent`
-    export const a = function () {
+  let expected = dedent`
+    export let a = function () {
       return;
     };
   `
@@ -95,16 +95,16 @@ test("function:expression", () => {
 })
 
 test("function:arrow", () => {
-  const source = dedent`
-    export const a = () => {
+  let source = dedent`
+    export let a = () => {
       return
     }
-    const _b = () => {
+    let _b = () => {
       return
     }
   `
-  const expected = dedent`
-    export const a = () => {
+  let expected = dedent`
+    export let a = () => {
       return;
     };
   `
@@ -112,37 +112,37 @@ test("function:arrow", () => {
 })
 
 test("variable:identifier", () => {
-  const source = dedent`
-    const a = "a"
-    const _b = "b"
+  let source = dedent`
+    let a = "a"
+    let _b = "b"
     console.log(a)
   `
-  const expected = dedent`
-    const a = "a";
+  let expected = dedent`
+    let a = "a";
     console.log(a);
   `
   expect(dce(source)).toBe(expected)
 })
 
 test("variable:array pattern", () => {
-  const source = dedent`
-    const [a, _b] = c
+  let source = dedent`
+    let [a, _b] = c
     console.log(a)
   `
-  const expected = dedent`
-    const [a] = c;
+  let expected = dedent`
+    let [a] = c;
     console.log(a);
   `
   expect(dce(source)).toBe(expected)
 })
 
 test("variable:object pattern", () => {
-  const source = dedent`
-    const {a, _b} = c
+  let source = dedent`
+    let {a, _b} = c
     console.log(a)
   `
-  const expected = dedent`
-    const {
+  let expected = dedent`
+    let {
       a
     } = c;
     console.log(a);
@@ -151,7 +151,7 @@ test("variable:object pattern", () => {
 })
 
 test("repeated elimination", () => {
-  const source = dedent`
+  let source = dedent`
     import { a } from "named"
     import b from "default"
     import * as c from "namespace"
@@ -160,23 +160,23 @@ test("repeated elimination", () => {
       return [a, b, c]
     }
 
-    const e = function () {
+    let e = function () {
       return d()
     }
 
-    const f = () => {
+    let f = () => {
       return e()
     }
 
-    const g = f()
-    const [h] = g
-    const { i } = g
+    let g = f()
+    let [h] = g
+    let { i } = g
 
-    export const j = "j"
+    export let j = "j"
     console.log("k")
   `
-  const expected = dedent`
-    export const j = "j";
+  let expected = dedent`
+    export let j = "j";
     console.log("k");
   `
   expect(dce(source)).toBe(expected)
