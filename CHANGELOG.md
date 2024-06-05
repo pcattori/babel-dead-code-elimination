@@ -1,5 +1,11 @@
 # babel-dead-code-elimination
 
+## 1.0.1
+
+### Patch Changes
+
+- c2d0e23: Provide `main` and `module` fields in `package.json` for older bundlers
+
 ## 1.0.0
 
 ### Major Changes
