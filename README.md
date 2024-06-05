@@ -4,6 +4,12 @@ Composable primitives for dead code elimination in Babel
 
 This package is **not a Babel plugin**, but rather a set of composable primitives to author your own Babel transforms and plugins.
 
+## Install
+
+```sh
+npm install babel-dead-code-elimination
+```
+
 ## deadCodeElimination
 
 Eliminates unused code from the Babel AST by repeatedly removing unreferenced identifiers.
