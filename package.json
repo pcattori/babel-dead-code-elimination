@@ -20,7 +20,7 @@
     "./package.json": "./package.json"
   },
   "main": "./dist/index.cjs",
-  "module": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "scripts": {
     "typecheck": "tsc",
     "build": "tsup",
