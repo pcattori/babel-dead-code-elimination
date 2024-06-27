@@ -125,39 +125,231 @@ describe("function", () => {
 describe("variable", () => {
   test("identifier", async () => {
     let source = dedent`
-      let a = "a"
-      let _b = "b"
-      console.log(a)
+      let _x = 1
+      let x = 1
+      ref(x)
     `
     expect(await dce(source)).toMatchInlineSnapshot(`
-      "let a = "a"
-      console.log(a)
+      "let x = 1
+      ref(x)
       "
     `)
   })
 
-  test("array pattern", async () => {
-    let source = dedent`
-      let [a, _b] = c
-      console.log(a)
-    `
-    expect(await dce(source)).toMatchInlineSnapshot(`
-      "let [a] = c
-      console.log(a)
-      "
-    `)
+  describe("object pattern", () => {
+    test("within variable declarator", async () => {
+      let source = dedent`
+        let { _a, a } = x
+        ref(a)
+        let {..._rest} = x
+        let {...rest} = x
+        ref(rest)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let { a } = x
+        ref(a)
+        let { ...rest } = x
+        ref(rest)
+        "
+      `)
+    })
+
+    test("within object property", async () => {
+      let source = dedent`
+        let { a: { _aa, aa, ..._rest } } = x
+        ref(aa)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let {
+          a: { aa },
+        } = x
+        ref(aa)
+        "
+      `)
+    })
+
+    test("within array pattern", async () => {
+      let source = dedent`
+        let { a: [{ _aa, aa, ..._rest }] } = x
+        ref(aa)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let {
+          a: [{ aa }],
+        } = x
+        ref(aa)
+        "
+      `)
+    })
+
+    describe("within assignment pattern", () => {
+      test("within object property", async () => {
+        let source = dedent`
+          let { a: { _aa, aa, ..._rest }={ aa: 1 } } = x
+          ref(aa)
+        `
+        expect(await dce(source)).toMatchInlineSnapshot(`
+          "let {
+            a: { aa } = {
+              aa: 1,
+            },
+          } = x
+          ref(aa)
+          "
+        `)
+      })
+
+      test("within array pattern", async () => {
+        let source = dedent`
+          let { a: [{ _aa, aa, ...rest }={ aa: 1 }] } = x
+          ref(aa)
+        `
+        expect(await dce(source)).toMatchInlineSnapshot(`
+          "let {
+            a: [
+              { aa } = {
+                aa: 1,
+              },
+            ],
+          } = x
+          ref(aa)
+          "
+        `)
+      })
+    })
+
+    test("within rest element", async () => {
+      let source = dedent`
+        let [...{ _a, a, ..._rest }] = x
+        ref(a)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let [...{ a }] = x
+        ref(a)
+        "
+      `)
+    })
+
+    test("unzips if all variables are unused", async () => {
+      let source = dedent`
+        let {
+          _a, // Identifier
+          _b: {_bb, ..._brest}, // within ObjectProperty
+          _c: [{_cc, ..._crest}], // within ArrayPattern
+          _d: {_dd, ..._drest} = {}, // within AssignmentPattern within ObjectProperty
+          _e: [{_ee, ..._erest}={}], // within AssignmentPattern within ArrayPattern
+          _f: [...{_ff, ..._frest}], // within RestElement
+          ..._g // RestElement
+        } = _x
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`""`)
+    })
   })
 
-  test("object pattern", async () => {
-    let source = dedent`
-      let {a, _b} = c
-      console.log(a)
-    `
-    expect(await dce(source)).toMatchInlineSnapshot(`
-      "let { a } = c
-      console.log(a)
-      "
-    `)
+  describe("array pattern", () => {
+    test("within variable declarator", async () => {
+      let source = dedent`
+        let [ _a0, a1, _a2, a3, _a4 ] = x
+        ref(a1, a3)
+        let [..._rest] = x
+        let [...rest] = x
+        ref(rest)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let [, a1, , a3, ,] = x
+        ref(a1, a3)
+        let [...rest] = x
+        ref(rest)
+        "
+      `)
+    })
+
+    test("within object property", async () => {
+      let source = dedent`
+        let { a: [ _aa, aa, ..._rest ] } = x
+        ref(aa)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let {
+          a: [, aa],
+        } = x
+        ref(aa)
+        "
+      `)
+    })
+
+    test("within array pattern", async () => {
+      let source = dedent`
+        let [[ _aa, aa, ..._rest ]] = x
+        ref(aa)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let [[, aa]] = x
+        ref(aa)
+        "
+      `)
+    })
+
+    describe("within assignment pattern", () => {
+      test("within object property", async () => {
+        let source = dedent`
+          let { a: { _aa, aa, ..._rest }={ aa: 1 } } = x
+          ref(aa)
+        `
+        expect(await dce(source)).toMatchInlineSnapshot(`
+          "let {
+            a: { aa } = {
+              aa: 1,
+            },
+          } = x
+          ref(aa)
+          "
+        `)
+      })
+
+      test("within array pattern", async () => {
+        let source = dedent`
+          let [{ _a, a, ...rest }={ a: 1 }] = x
+          ref(a)
+        `
+        expect(await dce(source)).toMatchInlineSnapshot(`
+          "let [
+            { a } = {
+              a: 1,
+            },
+          ] = x
+          ref(a)
+          "
+        `)
+      })
+    })
+
+    test("within rest element", async () => {
+      let source = dedent`
+        let [...[ _a, a, ..._rest ]] = x
+        ref(a)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let [...[, a]] = x
+        ref(a)
+        "
+      `)
+    })
+
+    test("unzips if all variables are unused", async () => {
+      let source = dedent`
+        let [
+          _a, // Identifier
+          {_b, ..._brest}, // within ObjectProperty
+          [{_c, ..._crest}], // within ArrayPattern
+          {_d, ..._drest} = {}, // within AssignmentPattern within ObjectProperty
+          [{_e, ..._erest}={}], // within AssignmentPattern within ArrayPattern
+          [...{_f, ..._frest}], // within RestElement
+          ..._g // RestElement
+        ] = _x
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`""`)
+    })
   })
 })
 
