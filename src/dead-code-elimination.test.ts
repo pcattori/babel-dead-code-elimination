@@ -2,64 +2,75 @@ import { describe, expect, test } from "vitest"
 import { parse } from "@babel/parser"
 import generate from "@babel/generator"
 import dedent from "dedent"
+import * as prettier from "prettier"
 
 import { traverse } from "./babel-esm"
 import deadCodeElimination from "./dead-code-elimination"
 import findReferencedIdentifiers from "./find-referenced-identifiers"
 
-let dce = (source: string): string => {
+async function format(source: string): Promise<string> {
+  return prettier.format(source, { parser: "babel", semi: false })
+}
+
+let dce = async (source: string): Promise<string> => {
   let ast = parse(source, { sourceType: "module" })
   deadCodeElimination(ast)
-  return generate(ast).code
+  return format(generate(ast).code)
 }
 
 describe("import", () => {
-  test("side-effect", () => {
+  test("side-effect", async () => {
     let source = dedent`
       import "side-effect"
     `
-    expect(dce(source)).toMatchInlineSnapshot(`"import "side-effect";"`)
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "import "side-effect"
+      "
+    `)
   })
 
-  test("named", () => {
+  test("named", async () => {
     let source = dedent`
       import { a, _b } from "named"
       import { _c } from "named-unused"
       console.log(a)
     `
-    expect(dce(source)).toMatchInlineSnapshot(`
-      "import { a } from "named";
-      console.log(a);"
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "import { a } from "named"
+      console.log(a)
+      "
     `)
   })
 
-  test("default", () => {
+  test("default", async () => {
     let source = dedent`
       import a from "default-used"
       import _b from "default-unused"
       console.log(a)
     `
-    expect(dce(source)).toMatchInlineSnapshot(`
-      "import a from "default-used";
-      console.log(a);"
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "import a from "default-used"
+      console.log(a)
+      "
     `)
   })
 
-  test("namespace", () => {
+  test("namespace", async () => {
     let source = dedent`
       import * as a from "namespace-used"
       import * as _b from "namespace-unused"
       console.log(a)
     `
-    expect(dce(source)).toMatchInlineSnapshot(`
-      "import * as a from "namespace-used";
-      console.log(a);"
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "import * as a from "namespace-used"
+      console.log(a)
+      "
     `)
   })
 })
 
 describe("function", () => {
-  test("declaration", () => {
+  test("declaration", async () => {
     let source = dedent`
       export function a() {
         return
@@ -68,14 +79,15 @@ describe("function", () => {
         return
       }
     `
-    expect(dce(source)).toMatchInlineSnapshot(`
+    expect(await dce(source)).toMatchInlineSnapshot(`
       "export function a() {
-        return;
-      }"
+        return
+      }
+      "
     `)
   })
 
-  test("expression", () => {
+  test("expression", async () => {
     let source = dedent`
       export let a = function () {
         return
@@ -84,14 +96,15 @@ describe("function", () => {
         return
       }
     `
-    expect(dce(source)).toMatchInlineSnapshot(`
+    expect(await dce(source)).toMatchInlineSnapshot(`
       "export let a = function () {
-        return;
-      };"
+        return
+      }
+      "
     `)
   })
 
-  test("arrow", () => {
+  test("arrow", async () => {
     let source = dedent`
       export let a = () => {
         return
@@ -100,53 +113,55 @@ describe("function", () => {
         return
       }
     `
-    expect(dce(source)).toMatchInlineSnapshot(`
+    expect(await dce(source)).toMatchInlineSnapshot(`
       "export let a = () => {
-        return;
-      };"
+        return
+      }
+      "
     `)
   })
 })
 
 describe("variable", () => {
-  test("identifier", () => {
+  test("identifier", async () => {
     let source = dedent`
       let a = "a"
       let _b = "b"
       console.log(a)
     `
-    expect(dce(source)).toMatchInlineSnapshot(`
-      "let a = "a";
-      console.log(a);"
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "let a = "a"
+      console.log(a)
+      "
     `)
   })
 
-  test("array pattern", () => {
+  test("array pattern", async () => {
     let source = dedent`
       let [a, _b] = c
       console.log(a)
     `
-    expect(dce(source)).toMatchInlineSnapshot(`
-      "let [a] = c;
-      console.log(a);"
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "let [a] = c
+      console.log(a)
+      "
     `)
   })
 
-  test("object pattern", () => {
+  test("object pattern", async () => {
     let source = dedent`
       let {a, _b} = c
       console.log(a)
     `
-    expect(dce(source)).toMatchInlineSnapshot(`
-      "let {
-        a
-      } = c;
-      console.log(a);"
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "let { a } = c
+      console.log(a)
+      "
     `)
   })
 })
 
-test("repeated elimination", () => {
+test("repeated elimination", async () => {
   let source = dedent`
     import { a } from "named"
     import b from "default"
@@ -171,13 +186,14 @@ test("repeated elimination", () => {
     export let j = "j"
     console.log("k")
   `
-  expect(dce(source)).toMatchInlineSnapshot(`
-    "export let j = "j";
-    console.log("k");"
+  expect(await dce(source)).toMatchInlineSnapshot(`
+    "export let j = "j"
+    console.log("k")
+    "
   `)
 })
 
-test("only eliminates newly unreferenced identifiers", () => {
+test("only eliminates newly unreferenced identifiers", async () => {
   let source = dedent`
     let alwaysUnreferenced = 1
 
@@ -196,9 +212,10 @@ test("only eliminates newly unreferenced identifiers", () => {
     },
   })
   deadCodeElimination(ast, referenced)
-  expect(generate(ast).code).toMatchInlineSnapshot(`
-    "let alwaysUnreferenced = 1;
-    let alwaysReferenced = 3;
-    console.log(alwaysReferenced);"
+  expect(await format(generate(ast).code)).toMatchInlineSnapshot(`
+    "let alwaysUnreferenced = 1
+    let alwaysReferenced = 3
+    console.log(alwaysReferenced)
+    "
   `)
 })
