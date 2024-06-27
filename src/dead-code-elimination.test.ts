@@ -17,10 +17,7 @@ test("import:side-effect", () => {
   let source = dedent`
     import "side-effect"
   `
-  let expected = dedent`
-    import "side-effect";
-  `
-  expect(dce(source)).toBe(expected)
+  expect(dce(source)).toMatchInlineSnapshot(`"import "side-effect";"`)
 })
 
 test("import:named", () => {
@@ -29,11 +26,10 @@ test("import:named", () => {
     import { _c } from "named-unused"
     console.log(a)
   `
-  let expected = dedent`
-    import { a } from "named";
-    console.log(a);
-  `
-  expect(dce(source)).toBe(expected)
+  expect(dce(source)).toMatchInlineSnapshot(`
+    "import { a } from "named";
+    console.log(a);"
+  `)
 })
 
 test("import:default", () => {
@@ -42,11 +38,10 @@ test("import:default", () => {
     import _b from "default-unused"
     console.log(a)
   `
-  let expected = dedent`
-    import a from "default-used";
-    console.log(a);
-  `
-  expect(dce(source)).toBe(expected)
+  expect(dce(source)).toMatchInlineSnapshot(`
+    "import a from "default-used";
+    console.log(a);"
+  `)
 })
 
 test("import:namespace", () => {
@@ -55,11 +50,10 @@ test("import:namespace", () => {
     import * as _b from "namespace-unused"
     console.log(a)
   `
-  let expected = dedent`
-    import * as a from "namespace-used";
-    console.log(a);
-  `
-  expect(dce(source)).toBe(expected)
+  expect(dce(source)).toMatchInlineSnapshot(`
+    "import * as a from "namespace-used";
+    console.log(a);"
+  `)
 })
 
 test("function:declaration", () => {
@@ -71,12 +65,11 @@ test("function:declaration", () => {
       return
     }
   `
-  let expected = dedent`
-    export function a() {
+  expect(dce(source)).toMatchInlineSnapshot(`
+    "export function a() {
       return;
-    }
-  `
-  expect(dce(source)).toBe(expected)
+    }"
+  `)
 })
 
 test("function:expression", () => {
@@ -88,12 +81,11 @@ test("function:expression", () => {
       return
     }
   `
-  let expected = dedent`
-    export let a = function () {
+  expect(dce(source)).toMatchInlineSnapshot(`
+    "export let a = function () {
       return;
-    };
-  `
-  expect(dce(source)).toBe(expected)
+    };"
+  `)
 })
 
 test("function:arrow", () => {
@@ -105,12 +97,11 @@ test("function:arrow", () => {
       return
     }
   `
-  let expected = dedent`
-    export let a = () => {
+  expect(dce(source)).toMatchInlineSnapshot(`
+    "export let a = () => {
       return;
-    };
-  `
-  expect(dce(source)).toBe(expected)
+    };"
+  `)
 })
 
 test("variable:identifier", () => {
@@ -119,11 +110,10 @@ test("variable:identifier", () => {
     let _b = "b"
     console.log(a)
   `
-  let expected = dedent`
-    let a = "a";
-    console.log(a);
-  `
-  expect(dce(source)).toBe(expected)
+  expect(dce(source)).toMatchInlineSnapshot(`
+    "let a = "a";
+    console.log(a);"
+  `)
 })
 
 test("variable:array pattern", () => {
@@ -131,11 +121,10 @@ test("variable:array pattern", () => {
     let [a, _b] = c
     console.log(a)
   `
-  let expected = dedent`
-    let [a] = c;
-    console.log(a);
-  `
-  expect(dce(source)).toBe(expected)
+  expect(dce(source)).toMatchInlineSnapshot(`
+    "let [a] = c;
+    console.log(a);"
+  `)
 })
 
 test("variable:object pattern", () => {
@@ -143,13 +132,12 @@ test("variable:object pattern", () => {
     let {a, _b} = c
     console.log(a)
   `
-  let expected = dedent`
-    let {
+  expect(dce(source)).toMatchInlineSnapshot(`
+    "let {
       a
     } = c;
-    console.log(a);
-  `
-  expect(dce(source)).toBe(expected)
+    console.log(a);"
+  `)
 })
 
 test("repeated elimination", () => {
@@ -177,11 +165,10 @@ test("repeated elimination", () => {
     export let j = "j"
     console.log("k")
   `
-  let expected = dedent`
-    export let j = "j";
-    console.log("k");
-  `
-  expect(dce(source)).toBe(expected)
+  expect(dce(source)).toMatchInlineSnapshot(`
+    "export let j = "j";
+    console.log("k");"
+  `)
 })
 
 test("only eliminates newly unreferenced identifiers", () => {
@@ -203,9 +190,9 @@ test("only eliminates newly unreferenced identifiers", () => {
     },
   })
   deadCodeElimination(ast, referenced)
-  expect(generate(ast).code).toBe(dedent`
-    let alwaysUnreferenced = 1;
+  expect(generate(ast).code).toMatchInlineSnapshot(`
+    "let alwaysUnreferenced = 1;
     let alwaysReferenced = 3;
-    console.log(alwaysReferenced);
+    console.log(alwaysReferenced);"
   `)
 })
