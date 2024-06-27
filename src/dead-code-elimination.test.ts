@@ -1,158 +1,359 @@
-import { expect, test } from "vitest"
+import { describe, expect, test } from "vitest"
 import { parse } from "@babel/parser"
 import generate from "@babel/generator"
 import dedent from "dedent"
+import * as prettier from "prettier"
 
 import { traverse } from "./babel-esm"
 import deadCodeElimination from "./dead-code-elimination"
 import findReferencedIdentifiers from "./find-referenced-identifiers"
 
-let dce = (source: string): string => {
-  let ast = parse(source, { sourceType: "module" })
-  deadCodeElimination(ast)
-  return generate(ast).code
+async function format(source: string): Promise<string> {
+  return prettier.format(source, { parser: "babel", semi: false })
 }
 
-test("import:side-effect", () => {
-  let source = dedent`
-    import "side-effect"
-  `
-  let expected = dedent`
-    import "side-effect";
-  `
-  expect(dce(source)).toBe(expected)
+let dce = async (source: string): Promise<string> => {
+  let ast = parse(source, { sourceType: "module" })
+  deadCodeElimination(ast)
+  return format(generate(ast).code)
+}
+
+describe("import", () => {
+  test("side-effect", async () => {
+    let source = dedent`
+      import "side-effect"
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "import "side-effect"
+      "
+    `)
+  })
+
+  test("named", async () => {
+    let source = dedent`
+      import { a, _b } from "named"
+      import { _c } from "named-unused"
+      console.log(a)
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "import { a } from "named"
+      console.log(a)
+      "
+    `)
+  })
+
+  test("default", async () => {
+    let source = dedent`
+      import a from "default-used"
+      import _b from "default-unused"
+      console.log(a)
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "import a from "default-used"
+      console.log(a)
+      "
+    `)
+  })
+
+  test("namespace", async () => {
+    let source = dedent`
+      import * as a from "namespace-used"
+      import * as _b from "namespace-unused"
+      console.log(a)
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "import * as a from "namespace-used"
+      console.log(a)
+      "
+    `)
+  })
 })
 
-test("import:named", () => {
-  let source = dedent`
-    import { a, _b } from "named"
-    import { _c } from "named-unused"
-    console.log(a)
-  `
-  let expected = dedent`
-    import { a } from "named";
-    console.log(a);
-  `
-  expect(dce(source)).toBe(expected)
+describe("function", () => {
+  test("declaration", async () => {
+    let source = dedent`
+      export function a() {
+        return
+      }
+      function _b() {
+        return
+      }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "export function a() {
+        return
+      }
+      "
+    `)
+  })
+
+  test("expression", async () => {
+    let source = dedent`
+      export let a = function () {
+        return
+      }
+      let _b = function () {
+        return
+      }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "export let a = function () {
+        return
+      }
+      "
+    `)
+  })
+
+  test("arrow", async () => {
+    let source = dedent`
+      export let a = () => {
+        return
+      }
+      let _b = () => {
+        return
+      }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "export let a = () => {
+        return
+      }
+      "
+    `)
+  })
 })
 
-test("import:default", () => {
-  let source = dedent`
-    import a from "default-used"
-    import _b from "default-unused"
-    console.log(a)
-  `
-  let expected = dedent`
-    import a from "default-used";
-    console.log(a);
-  `
-  expect(dce(source)).toBe(expected)
+describe("variable", () => {
+  test("identifier", async () => {
+    let source = dedent`
+      let _x = 1
+      let x = 1
+      ref(x)
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "let x = 1
+      ref(x)
+      "
+    `)
+  })
+
+  describe("object pattern", () => {
+    test("within variable declarator", async () => {
+      let source = dedent`
+        let { _a, a } = x
+        ref(a)
+        let {..._rest} = x
+        let {...rest} = x
+        ref(rest)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let { a } = x
+        ref(a)
+        let { ...rest } = x
+        ref(rest)
+        "
+      `)
+    })
+
+    test("within object property", async () => {
+      let source = dedent`
+        let { a: { _aa, aa, ..._rest } } = x
+        ref(aa)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let {
+          a: { aa },
+        } = x
+        ref(aa)
+        "
+      `)
+    })
+
+    test("within array pattern", async () => {
+      let source = dedent`
+        let { a: [{ _aa, aa, ..._rest }] } = x
+        ref(aa)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let {
+          a: [{ aa }],
+        } = x
+        ref(aa)
+        "
+      `)
+    })
+
+    describe("within assignment pattern", () => {
+      test("within object property", async () => {
+        let source = dedent`
+          let { a: { _aa, aa, ..._rest }={ aa: 1 } } = x
+          ref(aa)
+        `
+        expect(await dce(source)).toMatchInlineSnapshot(`
+          "let {
+            a: { aa } = {
+              aa: 1,
+            },
+          } = x
+          ref(aa)
+          "
+        `)
+      })
+
+      test("within array pattern", async () => {
+        let source = dedent`
+          let { a: [{ _aa, aa, ...rest }={ aa: 1 }] } = x
+          ref(aa)
+        `
+        expect(await dce(source)).toMatchInlineSnapshot(`
+          "let {
+            a: [
+              { aa } = {
+                aa: 1,
+              },
+            ],
+          } = x
+          ref(aa)
+          "
+        `)
+      })
+    })
+
+    test("within rest element", async () => {
+      let source = dedent`
+        let [...{ _a, a, ..._rest }] = x
+        ref(a)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let [...{ a }] = x
+        ref(a)
+        "
+      `)
+    })
+
+    test("unzips if all variables are unused", async () => {
+      let source = dedent`
+        let {
+          _a, // Identifier
+          _b: {_bb, ..._brest}, // within ObjectProperty
+          _c: [{_cc, ..._crest}], // within ArrayPattern
+          _d: {_dd, ..._drest} = {}, // within AssignmentPattern within ObjectProperty
+          _e: [{_ee, ..._erest}={}], // within AssignmentPattern within ArrayPattern
+          _f: [...{_ff, ..._frest}], // within RestElement
+          ..._g // RestElement
+        } = _x
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`""`)
+    })
+  })
+
+  describe("array pattern", () => {
+    test("within variable declarator", async () => {
+      let source = dedent`
+        let [ _a0, a1, _a2, a3, _a4 ] = x
+        ref(a1, a3)
+        let [..._rest] = x
+        let [...rest] = x
+        ref(rest)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let [, a1, , a3, ,] = x
+        ref(a1, a3)
+        let [...rest] = x
+        ref(rest)
+        "
+      `)
+    })
+
+    test("within object property", async () => {
+      let source = dedent`
+        let { a: [ _aa, aa, ..._rest ] } = x
+        ref(aa)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let {
+          a: [, aa],
+        } = x
+        ref(aa)
+        "
+      `)
+    })
+
+    test("within array pattern", async () => {
+      let source = dedent`
+        let [[ _aa, aa, ..._rest ]] = x
+        ref(aa)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let [[, aa]] = x
+        ref(aa)
+        "
+      `)
+    })
+
+    describe("within assignment pattern", () => {
+      test("within object property", async () => {
+        let source = dedent`
+          let { a: { _aa, aa, ..._rest }={ aa: 1 } } = x
+          ref(aa)
+        `
+        expect(await dce(source)).toMatchInlineSnapshot(`
+          "let {
+            a: { aa } = {
+              aa: 1,
+            },
+          } = x
+          ref(aa)
+          "
+        `)
+      })
+
+      test("within array pattern", async () => {
+        let source = dedent`
+          let [{ _a, a, ...rest }={ a: 1 }] = x
+          ref(a)
+        `
+        expect(await dce(source)).toMatchInlineSnapshot(`
+          "let [
+            { a } = {
+              a: 1,
+            },
+          ] = x
+          ref(a)
+          "
+        `)
+      })
+    })
+
+    test("within rest element", async () => {
+      let source = dedent`
+        let [...[ _a, a, ..._rest ]] = x
+        ref(a)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let [...[, a]] = x
+        ref(a)
+        "
+      `)
+    })
+
+    test("unzips if all variables are unused", async () => {
+      let source = dedent`
+        let [
+          _a, // Identifier
+          {_b, ..._brest}, // within ObjectProperty
+          [{_c, ..._crest}], // within ArrayPattern
+          {_d, ..._drest} = {}, // within AssignmentPattern within ObjectProperty
+          [{_e, ..._erest}={}], // within AssignmentPattern within ArrayPattern
+          [...{_f, ..._frest}], // within RestElement
+          ..._g // RestElement
+        ] = _x
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`""`)
+    })
+  })
 })
 
-test("import:namespace", () => {
-  let source = dedent`
-    import * as a from "namespace-used"
-    import * as _b from "namespace-unused"
-    console.log(a)
-  `
-  let expected = dedent`
-    import * as a from "namespace-used";
-    console.log(a);
-  `
-  expect(dce(source)).toBe(expected)
-})
-
-test("function:declaration", () => {
-  let source = dedent`
-    export function a() {
-      return
-    }
-    function _b() {
-      return
-    }
-  `
-  let expected = dedent`
-    export function a() {
-      return;
-    }
-  `
-  expect(dce(source)).toBe(expected)
-})
-
-test("function:expression", () => {
-  let source = dedent`
-    export let a = function () {
-      return
-    }
-    let _b = function () {
-      return
-    }
-  `
-  let expected = dedent`
-    export let a = function () {
-      return;
-    };
-  `
-  expect(dce(source)).toBe(expected)
-})
-
-test("function:arrow", () => {
-  let source = dedent`
-    export let a = () => {
-      return
-    }
-    let _b = () => {
-      return
-    }
-  `
-  let expected = dedent`
-    export let a = () => {
-      return;
-    };
-  `
-  expect(dce(source)).toBe(expected)
-})
-
-test("variable:identifier", () => {
-  let source = dedent`
-    let a = "a"
-    let _b = "b"
-    console.log(a)
-  `
-  let expected = dedent`
-    let a = "a";
-    console.log(a);
-  `
-  expect(dce(source)).toBe(expected)
-})
-
-test("variable:array pattern", () => {
-  let source = dedent`
-    let [a, _b] = c
-    console.log(a)
-  `
-  let expected = dedent`
-    let [a] = c;
-    console.log(a);
-  `
-  expect(dce(source)).toBe(expected)
-})
-
-test("variable:object pattern", () => {
-  let source = dedent`
-    let {a, _b} = c
-    console.log(a)
-  `
-  let expected = dedent`
-    let {
-      a
-    } = c;
-    console.log(a);
-  `
-  expect(dce(source)).toBe(expected)
-})
-
-test("repeated elimination", () => {
+test("repeated elimination", async () => {
   let source = dedent`
     import { a } from "named"
     import b from "default"
@@ -177,14 +378,14 @@ test("repeated elimination", () => {
     export let j = "j"
     console.log("k")
   `
-  let expected = dedent`
-    export let j = "j";
-    console.log("k");
-  `
-  expect(dce(source)).toBe(expected)
+  expect(await dce(source)).toMatchInlineSnapshot(`
+    "export let j = "j"
+    console.log("k")
+    "
+  `)
 })
 
-test("only eliminates newly unreferenced identifiers", () => {
+test("only eliminates newly unreferenced identifiers", async () => {
   let source = dedent`
     let alwaysUnreferenced = 1
 
@@ -203,9 +404,10 @@ test("only eliminates newly unreferenced identifiers", () => {
     },
   })
   deadCodeElimination(ast, referenced)
-  expect(generate(ast).code).toBe(dedent`
-    let alwaysUnreferenced = 1;
-    let alwaysReferenced = 3;
-    console.log(alwaysReferenced);
+  expect(await format(generate(ast).code)).toMatchInlineSnapshot(`
+    "let alwaysUnreferenced = 1
+    let alwaysReferenced = 3
+    console.log(alwaysReferenced)
+    "
   `)
 })
