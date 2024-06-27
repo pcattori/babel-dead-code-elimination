@@ -14,7 +14,7 @@ import * as Identifier from "./identifier"
  */
 export default function (
   ast: ParseResult<BabelTypes.File>,
-  candidates?: Set<Identifier.Path>
+  candidates?: Set<Identifier.Path>,
 ) {
   let referencesRemovedInThisPass: number
 
@@ -29,7 +29,7 @@ export default function (
       | BabelTypes.FunctionDeclaration
       | BabelTypes.FunctionExpression
       | BabelTypes.ArrowFunctionExpression
-    >
+    >,
   ) => {
     let identifier = Identifier.fromFunction(path)
     if (identifier?.node && shouldBeRemoved(identifier)) {
@@ -51,7 +51,7 @@ export default function (
       | BabelTypes.ImportSpecifier
       | BabelTypes.ImportDefaultSpecifier
       | BabelTypes.ImportNamespaceSpecifier
-    >
+    >,
   ) => {
     let local = path.get("local")
     if (shouldBeRemoved(local)) {
@@ -76,26 +76,24 @@ export default function (
       },
       // eslint-disable-next-line no-loop-func
       VariableDeclarator(path) {
-        if (path.node.id.type === "Identifier") {
-          let local = path.get("id") as NodePath<BabelTypes.Identifier>
-          if (shouldBeRemoved(local)) {
+        let id = path.get("id")
+        if (id.isIdentifier()) {
+          if (shouldBeRemoved(id)) {
             ++referencesRemovedInThisPass
             path.remove()
           }
-        } else if (path.node.id.type === "ObjectPattern") {
-          let pattern = path.get("id") as NodePath<BabelTypes.ObjectPattern>
-
+        } else if (id.isObjectPattern()) {
           let beforeCount = referencesRemovedInThisPass
-          let properties = pattern.get("properties")
+          let properties = id.get("properties")
           properties.forEach((property) => {
             let local = property.get(
               property.node.type === "ObjectProperty"
                 ? "value"
                 : property.node.type === "RestElement"
-                ? "argument"
-                : (function () {
-                    throw new Error("invariant")
-                  })()
+                  ? "argument"
+                  : (function () {
+                      throw new Error("invariant")
+                    })(),
             ) as NodePath<BabelTypes.Identifier>
 
             if (shouldBeRemoved(local)) {
@@ -106,15 +104,13 @@ export default function (
 
           if (
             beforeCount !== referencesRemovedInThisPass &&
-            pattern.get("properties").length < 1
+            id.get("properties").length < 1
           ) {
             path.remove()
           }
-        } else if (path.node.id.type === "ArrayPattern") {
-          let pattern = path.get("id") as NodePath<BabelTypes.ArrayPattern>
-
+        } else if (id.isArrayPattern()) {
           let beforeCount = referencesRemovedInThisPass
-          let elements = pattern.get("elements")
+          let elements = id.get("elements")
           elements.forEach((e) => {
             let local: NodePath<BabelTypes.Identifier>
             if (e.node?.type === "Identifier") {
@@ -133,7 +129,7 @@ export default function (
 
           if (
             beforeCount !== referencesRemovedInThisPass &&
-            pattern.get("elements").length < 1
+            id.get("elements").length < 1
           ) {
             path.remove()
           }
