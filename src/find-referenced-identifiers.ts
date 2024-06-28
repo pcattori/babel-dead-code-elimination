@@ -12,20 +12,15 @@ export default function (
 ): Set<NodePath<Babel.Identifier>> {
   const referenced = new Set<NodePath<Babel.Identifier>>()
 
-  function markImport(
-    path: NodePath<
-      | Babel.ImportSpecifier
-      | Babel.ImportDefaultSpecifier
-      | Babel.ImportNamespaceSpecifier
-    >,
-  ) {
-    const local = path.get("local")
-    if (Identifier.isReferenced(local)) {
-      referenced.add(local)
-    }
-  }
-
   traverse(ast, {
+    ImportDeclaration(path) {
+      for (let specifier of path.get("specifiers")) {
+        let local = specifier.get("local")
+        if (Identifier.isReferenced(local)) {
+          referenced.add(local)
+        }
+      }
+    },
     VariableDeclarator(path) {
       let id = path.get("id")
       if (id.isIdentifier()) {
@@ -40,16 +35,12 @@ export default function (
         }
       }
     },
-
     FunctionDeclaration(path) {
       let id = path.get("id")
       if (id.isIdentifier() && Identifier.isReferenced(id)) {
         referenced.add(id)
       }
     },
-    ImportSpecifier: markImport,
-    ImportDefaultSpecifier: markImport,
-    ImportNamespaceSpecifier: markImport,
   })
   return referenced
 }

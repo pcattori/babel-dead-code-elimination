@@ -26,29 +26,25 @@ export default function (
     return candidates.has(ident)
   }
 
-  let sweepImport = (
-    path: NodePath<
-      | Babel.ImportSpecifier
-      | Babel.ImportDefaultSpecifier
-      | Babel.ImportNamespaceSpecifier
-    >,
-  ) => {
-    let local = path.get("local")
-    if (shouldBeRemoved(local)) {
-      path.remove()
-      removals++
-      if ((path.parent as Babel.ImportDeclaration).specifiers.length === 0) {
-        path.parentPath.remove()
-      }
-    }
-  }
-
   do {
     removals = 0
 
     traverse(ast, {
       Program(path) {
         path.scope.crawl()
+      },
+      ImportDeclaration(path) {
+        let removalsBefore = removals
+        for (let specifier of path.get("specifiers")) {
+          let local = specifier.get("local")
+          if (shouldBeRemoved(local)) {
+            specifier.remove()
+            removals++
+          }
+        }
+        if (removals > removalsBefore && path.node.specifiers.length === 0) {
+          path.remove()
+        }
       },
       VariableDeclarator(path) {
         let id = path.get("id")
@@ -131,9 +127,6 @@ export default function (
           }
         }
       },
-      ImportSpecifier: sweepImport,
-      ImportDefaultSpecifier: sweepImport,
-      ImportNamespaceSpecifier: sweepImport,
     })
   } while (removals > 0)
 }
