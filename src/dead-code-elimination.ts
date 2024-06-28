@@ -33,6 +33,7 @@ export default function (
       | Babel.ArrowFunctionExpression
     >,
   ) => {
+    if (path.isFunctionExpression()) return
     let identifier = Identifier.fromFunction(path)
     if (identifier?.node && shouldBeRemoved(identifier)) {
       removals++
@@ -80,11 +81,10 @@ export default function (
             removals++
           }
         } else if (id.isObjectPattern() || id.isArrayPattern()) {
-          let vars = Pattern.findVariables(id)
-          for (let v of vars) {
-            if (Identifier.isReferenced(v)) continue
+          for (let variable of Pattern.findVariables(id)) {
+            if (Identifier.isReferenced(variable)) continue
 
-            let parent = v.parentPath
+            let parent = variable.parentPath
 
             if (parent.isObjectProperty()) {
               parent.remove()
@@ -93,7 +93,7 @@ export default function (
             }
 
             if (parent.isArrayPattern()) {
-              parent.node.elements[v.key as number] = null
+              parent.node.elements[variable.key as number] = null
               removals++
               continue
             }

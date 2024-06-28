@@ -89,17 +89,23 @@ describe("function", () => {
 
   test("expression", async () => {
     let source = dedent`
-      export let a = function () {
+      let _a = function () {
         return
       }
-      let _b = function () {
+      let a = function () {
         return
       }
+      ref(a)
+      ref(function () {})
+      ref(function named() {})
     `
     expect(await dce(source)).toMatchInlineSnapshot(`
-      "export let a = function () {
+      "let a = function () {
         return
       }
+      ref(a)
+      ref(function () {})
+      ref(function named() {})
       "
     `)
   })
