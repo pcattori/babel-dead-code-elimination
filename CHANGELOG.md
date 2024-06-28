@@ -1,5 +1,11 @@
 # babel-dead-code-elimination
 
+## 1.0.3
+
+### Patch Changes
+
+- ce456b5: Fix referenced variable finding within object patterns and array patterns
+
 ## 1.0.2
 
 ### Patch Changes
