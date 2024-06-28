@@ -33,6 +33,7 @@ export default function (
       | Babel.ArrowFunctionExpression
     >,
   ) => {
+    if (path.isFunctionExpression()) return
     let identifier = Identifier.fromFunction(path)
     if (identifier?.node && shouldBeRemoved(identifier)) {
       removals++
