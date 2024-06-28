@@ -1,5 +1,13 @@
 # babel-dead-code-elimination
 
+## 1.0.4
+
+### Patch Changes
+
+- ade9eee: Fix: do not eliminate function expressions
+
+  Function expressions do not add their names to outer scope, so they should never be dead code eliminated
+
 ## 1.0.3
 
 ### Patch Changes
