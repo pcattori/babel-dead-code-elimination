@@ -1,4 +1,4 @@
-export type { types as BabelTypes } from "@babel/core"
+export type { types as Babel } from "@babel/core"
 export { parse, type ParseResult } from "@babel/parser"
 export type { Node, NodePath, Binding } from "@babel/traverse"
 export * as t from "@babel/types"

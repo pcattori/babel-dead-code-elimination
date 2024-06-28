@@ -5,7 +5,7 @@ import {
   t,
   type Node,
   type NodePath,
-  type BabelTypes,
+  type Babel,
   type ParseResult,
 } from "./babel-esm"
 import * as Identifier from "./identifier"
@@ -14,12 +14,12 @@ import * as Identifier from "./identifier"
  * @param candidates - If provided, only these identifiers will be candidates for dead code elimination.
  */
 export default function (
-  ast: ParseResult<BabelTypes.File>,
-  candidates?: Set<Identifier.Path>,
+  ast: ParseResult<Babel.File>,
+  candidates?: Set<NodePath<Babel.Identifier>>,
 ) {
-  let referencesRemovedInThisPass: number
+  let removals: number
 
-  let shouldBeRemoved = (ident: Identifier.Path) => {
+  let shouldBeRemoved = (ident: NodePath<Babel.Identifier>) => {
     if (Identifier.isReferenced(ident)) return false
     if (!candidates) return true
     return candidates.has(ident)
@@ -27,14 +27,14 @@ export default function (
 
   let sweepFunction = (
     path: NodePath<
-      | BabelTypes.FunctionDeclaration
-      | BabelTypes.FunctionExpression
-      | BabelTypes.ArrowFunctionExpression
+      | Babel.FunctionDeclaration
+      | Babel.FunctionExpression
+      | Babel.ArrowFunctionExpression
     >,
   ) => {
     let identifier = Identifier.fromFunction(path)
     if (identifier?.node && shouldBeRemoved(identifier)) {
-      ++referencesRemovedInThisPass
+      removals++
 
       if (
         t.isAssignmentExpression(path.parentPath.node) ||
@@ -49,18 +49,16 @@ export default function (
 
   let sweepImport = (
     path: NodePath<
-      | BabelTypes.ImportSpecifier
-      | BabelTypes.ImportDefaultSpecifier
-      | BabelTypes.ImportNamespaceSpecifier
+      | Babel.ImportSpecifier
+      | Babel.ImportDefaultSpecifier
+      | Babel.ImportNamespaceSpecifier
     >,
   ) => {
     let local = path.get("local")
     if (shouldBeRemoved(local)) {
-      ++referencesRemovedInThisPass
       path.remove()
-      if (
-        (path.parent as BabelTypes.ImportDeclaration).specifiers.length === 0
-      ) {
+      removals++
+      if ((path.parent as Babel.ImportDeclaration).specifiers.length === 0) {
         path.parentPath.remove()
       }
     }
@@ -69,7 +67,7 @@ export default function (
   // Traverse again to remove unused references. This happens at least once,
   // then repeats until no more references are removed.
   do {
-    referencesRemovedInThisPass = 0
+    removals = 0
 
     traverse(ast, {
       Program(path) {
@@ -80,8 +78,8 @@ export default function (
         let id = path.get("id")
         if (id.isIdentifier()) {
           if (shouldBeRemoved(id)) {
-            ++referencesRemovedInThisPass
             path.remove()
+            removals++
           }
         } else if (id.isObjectPattern() || id.isArrayPattern()) {
           let vars = findVariablesInPattern(id)
@@ -89,25 +87,28 @@ export default function (
             if (Identifier.isReferenced(v)) continue
 
             let parent = v.parentPath
-            ++referencesRemovedInThisPass
 
             if (parent.isObjectProperty()) {
               parent.remove()
+              removals++
               continue
             }
 
             if (parent.isArrayPattern()) {
               parent.node.elements[v.key as number] = null
+              removals++
               continue
             }
 
             if (parent.isAssignmentPattern()) {
               if (t.isObjectProperty(parent.parent)) {
                 parent.parentPath?.remove()
+                removals++
                 continue
               }
               if (t.isArrayPattern(parent.parent)) {
                 parent.parent.elements[parent.key as number] = null
+                removals++
                 continue
               }
               throw unexpected(parent)
@@ -115,6 +116,7 @@ export default function (
 
             if (parent.isRestElement()) {
               parent.remove()
+              removals++
               continue
             }
 
@@ -128,7 +130,7 @@ export default function (
         let isEmpty = path.node.properties.length === 0
         if (isWithinDeclarator && isEmpty) {
           removePattern(path)
-          referencesRemovedInThisPass++
+          removals++
         }
       },
       ArrayPattern(path) {
@@ -137,7 +139,7 @@ export default function (
         let isEmpty = path.node.elements.every((e) => e === null)
         if (isWithinDeclarator && isEmpty) {
           removePattern(path)
-          referencesRemovedInThisPass++
+          removals++
         }
       },
       FunctionDeclaration: sweepFunction,
@@ -147,7 +149,7 @@ export default function (
       ImportDefaultSpecifier: sweepImport,
       ImportNamespaceSpecifier: sweepImport,
     })
-  } while (referencesRemovedInThisPass)
+  } while (removals > 0)
 }
 
 function findVariablesInPattern(
