@@ -12,15 +12,6 @@ export default function (
 ): Set<NodePath<Babel.Identifier>> {
   const referenced = new Set<NodePath<Babel.Identifier>>()
 
-  function markFunction(
-    path: NodePath<Babel.FunctionDeclaration | Babel.ArrowFunctionExpression>,
-  ) {
-    const ident = Identifier.fromFunction(path)
-    if (ident?.node && Identifier.isReferenced(ident)) {
-      referenced.add(ident)
-    }
-  }
-
   function markImport(
     path: NodePath<
       | Babel.ImportSpecifier
@@ -50,8 +41,12 @@ export default function (
       }
     },
 
-    FunctionDeclaration: markFunction,
-    ArrowFunctionExpression: markFunction,
+    FunctionDeclaration(path) {
+      let id = path.get("id")
+      if (id.isIdentifier() && Identifier.isReferenced(id)) {
+        referenced.add(id)
+      }
+    },
     ImportSpecifier: markImport,
     ImportDefaultSpecifier: markImport,
     ImportNamespaceSpecifier: markImport,
