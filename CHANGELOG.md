@@ -1,5 +1,23 @@
 # babel-dead-code-elimination
 
+## 1.0.5
+
+### Patch Changes
+
+- 3cf19e5: Fix: do not check function expressions for referenced variables
+
+  Function expressions do not add their names to outer scopes
+
+- 5149b08: Do not eliminate arrow expressions
+
+  Arrow expressions do not add names to the outer scope.
+  Arrow expressions bound to names via variable declarators are already handled by `VariableDeclarator` visitor.
+
+- 86af914: Do not eliminate unreferenced variables from array patterns and object patterns when they do not match the provided candidates
+
+  Previously, the `candidates` were passed in to `deadCodeElimination` were not consulted when removing unreferenced variables from within patterns.
+  This was a bug and has now been fixed.
+
 ## 1.0.4
 
 ### Patch Changes
