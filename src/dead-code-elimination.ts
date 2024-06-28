@@ -26,24 +26,6 @@ export default function (
     return candidates.has(ident)
   }
 
-  let sweepFunction = (
-    path: NodePath<Babel.FunctionDeclaration | Babel.ArrowFunctionExpression>,
-  ) => {
-    let identifier = Identifier.fromFunction(path)
-    if (identifier?.node && shouldBeRemoved(identifier)) {
-      removals++
-
-      if (
-        t.isAssignmentExpression(path.parentPath.node) ||
-        t.isVariableDeclarator(path.parentPath.node)
-      ) {
-        path.parentPath.remove()
-      } else {
-        path.remove()
-      }
-    }
-  }
-
   let sweepImport = (
     path: NodePath<
       | Babel.ImportSpecifier
@@ -135,8 +117,20 @@ export default function (
           removals++
         }
       },
-      FunctionDeclaration: sweepFunction,
-      ArrowFunctionExpression: sweepFunction,
+      FunctionDeclaration(path) {
+        let id = path.get("id")
+        if (id.isIdentifier() && shouldBeRemoved(id)) {
+          removals++
+          if (
+            t.isAssignmentExpression(path.parentPath.node) ||
+            t.isVariableDeclarator(path.parentPath.node)
+          ) {
+            path.parentPath.remove()
+          } else {
+            path.remove()
+          }
+        }
+      },
       ImportSpecifier: sweepImport,
       ImportDefaultSpecifier: sweepImport,
       ImportNamespaceSpecifier: sweepImport,
