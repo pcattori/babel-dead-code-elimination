@@ -1,5 +1,3 @@
-// Adapted from https://github.com/egoist/babel-plugin-eliminator/blob/d29859396b7708b7f7abbacdd951cbbc80902f00/src/index.ts
-
 import {
   traverse,
   t,
