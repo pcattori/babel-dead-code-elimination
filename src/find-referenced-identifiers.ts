@@ -5,6 +5,7 @@ import {
   type ParseResult,
 } from "./babel-esm"
 import * as Identifier from "./identifier"
+import * as Pattern from "./pattern"
 
 export default function (
   ast: ParseResult<Babel.File>,
@@ -39,47 +40,18 @@ export default function (
 
   traverse(ast, {
     VariableDeclarator(path) {
-      if (path.node.id.type === "Identifier") {
-        const local = path.get("id") as NodePath<Babel.Identifier>
-        if (Identifier.isReferenced(local)) {
-          referenced.add(local)
+      let id = path.get("id")
+      if (id.isIdentifier()) {
+        if (Identifier.isReferenced(id)) {
+          referenced.add(id)
         }
-      } else if (path.node.id.type === "ObjectPattern") {
-        const pattern = path.get("id") as NodePath<Babel.ObjectPattern>
-
-        const properties = pattern.get("properties")
-        properties.forEach((p) => {
-          const local = p.get(
-            p.node.type === "ObjectProperty"
-              ? "value"
-              : p.node.type === "RestElement"
-                ? "argument"
-                : (function () {
-                    throw new Error("invariant")
-                  })(),
-          ) as NodePath<Babel.Identifier>
-          if (Identifier.isReferenced(local)) {
-            referenced.add(local)
+      } else if (id.isObjectPattern() || id.isArrayPattern()) {
+        let vars = Pattern.findVariables(id)
+        for (let ident of vars) {
+          if (Identifier.isReferenced(ident)) {
+            referenced.add(ident)
           }
-        })
-      } else if (path.node.id.type === "ArrayPattern") {
-        const pattern = path.get("id") as NodePath<Babel.ArrayPattern>
-
-        const elements = pattern.get("elements")
-        elements.forEach((e) => {
-          let local: NodePath<Babel.Identifier>
-          if (e.node?.type === "Identifier") {
-            local = e as NodePath<Babel.Identifier>
-          } else if (e.node?.type === "RestElement") {
-            local = e.get("argument") as NodePath<Babel.Identifier>
-          } else {
-            return
-          }
-
-          if (Identifier.isReferenced(local)) {
-            referenced.add(local)
-          }
-        })
+        }
       }
     },
 
