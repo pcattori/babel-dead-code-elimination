@@ -1,22 +1,22 @@
 import {
   traverse,
   type NodePath,
-  type BabelTypes,
+  type Babel,
   type ParseResult,
 } from "./babel-esm"
 import * as Identifier from "./identifier"
 
 export default function (
-  ast: ParseResult<BabelTypes.File>
-): Set<Identifier.Path> {
-  const referenced = new Set<Identifier.Path>()
+  ast: ParseResult<Babel.File>,
+): Set<NodePath<Babel.Identifier>> {
+  const referenced = new Set<NodePath<Babel.Identifier>>()
 
   function markFunction(
     path: NodePath<
-      | BabelTypes.FunctionDeclaration
-      | BabelTypes.FunctionExpression
-      | BabelTypes.ArrowFunctionExpression
-    >
+      | Babel.FunctionDeclaration
+      | Babel.FunctionExpression
+      | Babel.ArrowFunctionExpression
+    >,
   ) {
     const ident = Identifier.fromFunction(path)
     if (ident?.node && Identifier.isReferenced(ident)) {
@@ -26,10 +26,10 @@ export default function (
 
   function markImport(
     path: NodePath<
-      | BabelTypes.ImportSpecifier
-      | BabelTypes.ImportDefaultSpecifier
-      | BabelTypes.ImportNamespaceSpecifier
-    >
+      | Babel.ImportSpecifier
+      | Babel.ImportDefaultSpecifier
+      | Babel.ImportNamespaceSpecifier
+    >,
   ) {
     const local = path.get("local")
     if (Identifier.isReferenced(local)) {
@@ -40,12 +40,12 @@ export default function (
   traverse(ast, {
     VariableDeclarator(path) {
       if (path.node.id.type === "Identifier") {
-        const local = path.get("id") as NodePath<BabelTypes.Identifier>
+        const local = path.get("id") as NodePath<Babel.Identifier>
         if (Identifier.isReferenced(local)) {
           referenced.add(local)
         }
       } else if (path.node.id.type === "ObjectPattern") {
-        const pattern = path.get("id") as NodePath<BabelTypes.ObjectPattern>
+        const pattern = path.get("id") as NodePath<Babel.ObjectPattern>
 
         const properties = pattern.get("properties")
         properties.forEach((p) => {
@@ -53,25 +53,25 @@ export default function (
             p.node.type === "ObjectProperty"
               ? "value"
               : p.node.type === "RestElement"
-              ? "argument"
-              : (function () {
-                  throw new Error("invariant")
-                })()
-          ) as NodePath<BabelTypes.Identifier>
+                ? "argument"
+                : (function () {
+                    throw new Error("invariant")
+                  })(),
+          ) as NodePath<Babel.Identifier>
           if (Identifier.isReferenced(local)) {
             referenced.add(local)
           }
         })
       } else if (path.node.id.type === "ArrayPattern") {
-        const pattern = path.get("id") as NodePath<BabelTypes.ArrayPattern>
+        const pattern = path.get("id") as NodePath<Babel.ArrayPattern>
 
         const elements = pattern.get("elements")
         elements.forEach((e) => {
-          let local: NodePath<BabelTypes.Identifier>
+          let local: NodePath<Babel.Identifier>
           if (e.node?.type === "Identifier") {
-            local = e as NodePath<BabelTypes.Identifier>
+            local = e as NodePath<Babel.Identifier>
           } else if (e.node?.type === "RestElement") {
-            local = e.get("argument") as NodePath<BabelTypes.Identifier>
+            local = e.get("argument") as NodePath<Babel.Identifier>
           } else {
             return
           }

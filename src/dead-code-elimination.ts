@@ -5,7 +5,7 @@ import {
   t,
   type Node,
   type NodePath,
-  type BabelTypes,
+  type Babel,
   type ParseResult,
 } from "./babel-esm"
 import * as Identifier from "./identifier"
@@ -14,12 +14,12 @@ import * as Identifier from "./identifier"
  * @param candidates - If provided, only these identifiers will be candidates for dead code elimination.
  */
 export default function (
-  ast: ParseResult<BabelTypes.File>,
-  candidates?: Set<Identifier.Path>,
+  ast: ParseResult<Babel.File>,
+  candidates?: Set<NodePath<Babel.Identifier>>,
 ) {
   let removals: number
 
-  let shouldBeRemoved = (ident: Identifier.Path) => {
+  let shouldBeRemoved = (ident: NodePath<Babel.Identifier>) => {
     if (Identifier.isReferenced(ident)) return false
     if (!candidates) return true
     return candidates.has(ident)
@@ -27,9 +27,9 @@ export default function (
 
   let sweepFunction = (
     path: NodePath<
-      | BabelTypes.FunctionDeclaration
-      | BabelTypes.FunctionExpression
-      | BabelTypes.ArrowFunctionExpression
+      | Babel.FunctionDeclaration
+      | Babel.FunctionExpression
+      | Babel.ArrowFunctionExpression
     >,
   ) => {
     let identifier = Identifier.fromFunction(path)
@@ -49,18 +49,16 @@ export default function (
 
   let sweepImport = (
     path: NodePath<
-      | BabelTypes.ImportSpecifier
-      | BabelTypes.ImportDefaultSpecifier
-      | BabelTypes.ImportNamespaceSpecifier
+      | Babel.ImportSpecifier
+      | Babel.ImportDefaultSpecifier
+      | Babel.ImportNamespaceSpecifier
     >,
   ) => {
     let local = path.get("local")
     if (shouldBeRemoved(local)) {
       path.remove()
       removals++
-      if (
-        (path.parent as BabelTypes.ImportDeclaration).specifiers.length === 0
-      ) {
+      if ((path.parent as Babel.ImportDeclaration).specifiers.length === 0) {
         path.parentPath.remove()
       }
     }
