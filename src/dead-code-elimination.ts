@@ -27,13 +27,8 @@ export default function (
   }
 
   let sweepFunction = (
-    path: NodePath<
-      | Babel.FunctionDeclaration
-      | Babel.FunctionExpression
-      | Babel.ArrowFunctionExpression
-    >,
+    path: NodePath<Babel.FunctionDeclaration | Babel.ArrowFunctionExpression>,
   ) => {
-    if (path.isFunctionExpression()) return
     let identifier = Identifier.fromFunction(path)
     if (identifier?.node && shouldBeRemoved(identifier)) {
       removals++
@@ -141,7 +136,6 @@ export default function (
         }
       },
       FunctionDeclaration: sweepFunction,
-      FunctionExpression: sweepFunction,
       ArrowFunctionExpression: sweepFunction,
       ImportSpecifier: sweepImport,
       ImportDefaultSpecifier: sweepImport,

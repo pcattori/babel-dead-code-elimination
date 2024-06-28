@@ -112,17 +112,15 @@ describe("function", () => {
 
   test("arrow", async () => {
     let source = dedent`
-      export let a = () => {
-        return
-      }
-      let _b = () => {
-        return
-      }
+      let _a = () => {}
+      let a = () => {}
+      ref(a)
+      ref(() => {})
     `
     expect(await dce(source)).toMatchInlineSnapshot(`
-      "export let a = () => {
-        return
-      }
+      "let a = () => {}
+      ref(a)
+      ref(() => {})
       "
     `)
   })

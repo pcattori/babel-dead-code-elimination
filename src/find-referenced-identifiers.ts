@@ -13,11 +13,7 @@ export default function (
   const referenced = new Set<NodePath<Babel.Identifier>>()
 
   function markFunction(
-    path: NodePath<
-      | Babel.FunctionDeclaration
-      | Babel.FunctionExpression
-      | Babel.ArrowFunctionExpression
-    >,
+    path: NodePath<Babel.FunctionDeclaration | Babel.ArrowFunctionExpression>,
   ) {
     const ident = Identifier.fromFunction(path)
     if (ident?.node && Identifier.isReferenced(ident)) {
@@ -55,7 +51,6 @@ export default function (
     },
 
     FunctionDeclaration: markFunction,
-    FunctionExpression: markFunction,
     ArrowFunctionExpression: markFunction,
     ImportSpecifier: markImport,
     ImportDefaultSpecifier: markImport,
