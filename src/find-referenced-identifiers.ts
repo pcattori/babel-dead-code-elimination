@@ -46,10 +46,9 @@ export default function (
           referenced.add(id)
         }
       } else if (id.isObjectPattern() || id.isArrayPattern()) {
-        let vars = Pattern.findVariables(id)
-        for (let ident of vars) {
-          if (Identifier.isReferenced(ident)) {
-            referenced.add(ident)
+        for (let variable of Pattern.findVariables(id)) {
+          if (Identifier.isReferenced(variable)) {
+            referenced.add(variable)
           }
         }
       }
