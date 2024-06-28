@@ -59,7 +59,7 @@ export default function (
           }
         } else if (id.isObjectPattern() || id.isArrayPattern()) {
           for (let variable of Pattern.findVariables(id)) {
-            if (Identifier.isReferenced(variable)) continue
+            if (!shouldBeRemoved(variable)) continue
 
             let parent = variable.parentPath
 
