@@ -65,8 +65,6 @@ export default function (
     }
   }
 
-  // Traverse again to remove unused references. This happens at least once,
-  // then repeats until no more references are removed.
   do {
     removals = 0
 
@@ -74,7 +72,6 @@ export default function (
       Program(path) {
         path.scope.crawl()
       },
-      // eslint-disable-next-line no-loop-func
       VariableDeclarator(path) {
         let id = path.get("id")
         if (id.isIdentifier()) {
