@@ -1,5 +1,13 @@
 # babel-dead-code-elimination
 
+## 1.0.6
+
+### Patch Changes
+
+- d4690c2: Do not eliminate empty object/array pattern function parameters
+
+  Function parameters are not dead code
+
 ## 1.0.5
 
 ### Patch Changes
