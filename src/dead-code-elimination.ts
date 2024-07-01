@@ -96,8 +96,11 @@ export default function (
       ObjectPattern(path) {
         let isWithinDeclarator =
           path.find((p) => p.isVariableDeclarator()) !== null
+        let isFunctionParam =
+          path.parentPath.isFunction() &&
+          path.parentPath.node.params.includes(path.node)
         let isEmpty = path.node.properties.length === 0
-        if (isWithinDeclarator && isEmpty) {
+        if (isWithinDeclarator && !isFunctionParam && isEmpty) {
           Pattern.remove(path)
           removals++
         }
@@ -105,8 +108,11 @@ export default function (
       ArrayPattern(path) {
         let isWithinDeclarator =
           path.find((p) => p.isVariableDeclarator()) !== null
+        let isFunctionParam =
+          path.parentPath.isFunction() &&
+          path.parentPath.node.params.includes(path.node)
         let isEmpty = path.node.elements.every((e) => e === null)
-        if (isWithinDeclarator && isEmpty) {
+        if (isWithinDeclarator && !isFunctionParam && isEmpty) {
           Pattern.remove(path)
           removals++
         }

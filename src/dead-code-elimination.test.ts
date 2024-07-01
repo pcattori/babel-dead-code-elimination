@@ -234,6 +234,102 @@ describe("variable", () => {
       `)
     })
 
+    describe("within function param", () => {
+      test("within function declaration", async () => {
+        let source = dedent`
+          function f(a, {}) { return a; }
+          ref(f)
+        `
+        expect(await dce(source)).toMatchInlineSnapshot(`
+          "function f(a, {}) {
+            return a
+          }
+          ref(f)
+          "
+        `)
+      })
+
+      test("within function expression", async () => {
+        let source = dedent`
+          const f = function(a, {}) { return a }
+          ref(f)
+        `
+        expect(await dce(source)).toMatchInlineSnapshot(`
+          "const f = function (a, {}) {
+            return a
+          }
+          ref(f)
+          "
+        `)
+      })
+
+      test("within object method", async () => {
+        let source = dedent`
+          const a = {
+            f(a, {}) { return a }
+          }
+          ref(a.f)
+        `
+        expect(await dce(source)).toMatchInlineSnapshot(`
+          "const a = {
+            f(a, {}) {
+              return a
+            },
+          }
+          ref(a.f)
+          "
+        `)
+      })
+
+      test("within arrow function expression", async () => {
+        let source = dedent`
+          let f = (a, {}) => a
+          ref(f)
+        `
+        expect(await dce(source)).toMatchInlineSnapshot(`
+          "let f = (a, {}) => a
+          ref(f)
+          "
+        `)
+      })
+
+      test("within class method", async () => {
+        let source = dedent`
+          class A {
+            f(a, {}) { return a }
+          }
+          ref(A)
+        `
+        expect(await dce(source)).toMatchInlineSnapshot(`
+          "class A {
+            f(a, {}) {
+              return a
+            }
+          }
+          ref(A)
+          "
+        `)
+      })
+
+      test("within class private method", async () => {
+        let source = dedent`
+          class A {
+            #f(a, {}) { return a }
+          }
+          ref(A)
+        `
+        expect(await dce(source)).toMatchInlineSnapshot(`
+          "class A {
+            #f(a, {}) {
+              return a
+            }
+          }
+          ref(A)
+          "
+        `)
+      })
+    })
+
     test("unzips if all variables are unused", async () => {
       let source = dedent`
         let {
