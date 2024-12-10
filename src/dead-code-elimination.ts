@@ -47,7 +47,9 @@ export default function (
       VariableDeclarator(path) {
         let id = path.get("id")
         if (id.isIdentifier()) {
-          if (shouldBeRemoved(id)) {
+          let parent = path.parentPath
+          let isWithinForInStatement = parent.isVariableDeclaration() && parent.parentPath.isForInStatement()
+          if (!isWithinForInStatement && shouldBeRemoved(id)) {
             path.remove()
             removals++
           }

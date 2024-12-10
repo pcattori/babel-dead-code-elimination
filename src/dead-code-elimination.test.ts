@@ -140,6 +140,19 @@ describe("variable", () => {
     `)
   })
 
+  test("within for...in statement", async () => {
+    let source = dedent`
+      for (var key in obj) {}
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "for (var key in obj) {
+      }
+      "
+    `)
+  })
+
+
+
   describe("object pattern", () => {
     test("within variable declarator", async () => {
       let source = dedent`
