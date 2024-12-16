@@ -4,7 +4,8 @@
 
 ### Patch Changes
 
-- 81ef06b: - Do not eliminate for-loop iterator variables (`for...of`/`for...in`)
+- 81ef06b:
+  - Do not eliminate for-loop iterator variables (`for...of`/`for...in`)
   - Do not eliminate reassigned variables
 
 ## 1.0.6
