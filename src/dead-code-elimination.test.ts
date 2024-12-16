@@ -140,6 +140,28 @@ describe("variable", () => {
     `)
   })
 
+  test("within for...in", async () => {
+    let source = dedent`
+      for (var a in b) {}
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "for (var a in b) {
+      }
+      "
+    `)
+  })
+
+  test("within for...of", async () => {
+    let source = dedent`
+      for (var a of b) {}
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "for (var a of b) {
+      }
+      "
+    `)
+  })
+
   describe("object pattern", () => {
     test("within variable declarator", async () => {
       let source = dedent`
@@ -451,6 +473,18 @@ describe("variable", () => {
       expect(await dce(source)).toMatchInlineSnapshot(`""`)
     })
   })
+})
+
+test("assignment", async () => {
+  let source = dedent`
+    let x = 1
+    x = 2
+  `
+  expect(await dce(source)).toMatchInlineSnapshot(`
+    "let x = 1
+    x = 2
+    "
+  `)
 })
 
 test("repeated elimination", async () => {

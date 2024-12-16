@@ -2,7 +2,9 @@ import { type NodePath, type Babel } from "./babel-esm"
 
 export function isReferenced(ident: NodePath<Babel.Identifier>): boolean {
   let binding = ident.scope.getBinding(ident.node.name)
-  if (binding?.referenced) {
+  if (!binding) return false
+
+  if (binding.referenced) {
     // Functions can reference themselves, so we need to check if there's a
     // binding outside the function scope or not.
     if (binding.path.type === "FunctionDeclaration") {
@@ -14,5 +16,6 @@ export function isReferenced(ident: NodePath<Babel.Identifier>): boolean {
 
     return true
   }
-  return false
+
+  return binding.constantViolations.length > 0
 }
