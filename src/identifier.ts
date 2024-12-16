@@ -13,6 +13,8 @@ export function isReferenced(ident: NodePath<Babel.Identifier>): boolean {
     }
 
     return true
+  }else if(binding?.constantViolations.length){
+    return true
   }
   return false
 }

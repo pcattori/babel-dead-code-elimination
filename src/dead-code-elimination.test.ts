@@ -140,6 +140,63 @@ describe("variable", () => {
     `)
   })
 
+  test("for...in statement", async () => {
+    let source = dedent`
+      for (var key in obj) {}
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "for (var key in obj) {
+      }
+      "
+    `)
+  })
+
+  test("assignment within catch block", async () => {
+    let source = dedent`
+      export function a() {
+        let aa = undefined;
+        try {
+          throw "";
+        } catch {
+          aa = 5;
+        }
+        return "";
+      }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "export function a() {
+        let aa = undefined
+        try {
+          throw ""
+        } catch {
+          aa = 5
+        }
+        return ""
+      }
+      "
+    `)
+  })
+
+  test("assignment within return statement", async () => {
+    let source = dedent`
+      let a
+      export let b = {
+        get c(){
+          return (a ??= 1)
+        }
+      }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "let a
+      export let b = {
+        get c() {
+          return (a ??= 1)
+        },
+      }
+      "
+    `)
+  })
+
   describe("object pattern", () => {
     test("within variable declarator", async () => {
       let source = dedent`
