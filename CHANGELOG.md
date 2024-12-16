@@ -1,5 +1,12 @@
 # babel-dead-code-elimination
 
+## 1.0.7
+
+### Patch Changes
+
+- 81ef06b: - Do not eliminate for-loop iterator variables (`for...of`/`for...in`)
+  - Do not eliminate reassigned variables
+
 ## 1.0.6
 
 ### Patch Changes
