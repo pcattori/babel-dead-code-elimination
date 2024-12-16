@@ -138,29 +138,30 @@ describe("variable", () => {
       ref(x)
       "
     `)
-  })
+  });
 
-  test("within for...in", async () => {
-    let source = dedent`
-      for (var a in b) {}
-    `
-    expect(await dce(source)).toMatchInlineSnapshot(`
-      "for (var a in b) {
-      }
-      "
-    `)
-  })
+  ['var', 'const', 'let'].forEach((decl) => {
+    test(`within for...in: ${decl}`, async () => {
+      let source = `for (${decl} a in b) {}`
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "for (${decl} a in b) {
+        }
+        "
+      `)
+    })
+  });
 
-  test("within for...of", async () => {
-    let source = dedent`
-      for (var a of b) {}
-    `
-    expect(await dce(source)).toMatchInlineSnapshot(`
-      "for (var a of b) {
-      }
-      "
-    `)
-  })
+  ['var', 'const', 'let'].forEach((decl) => {
+    test(`within for...of: ${decl}`, async () => {
+      let source = `for (${decl} a of b) {}`
+
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "for (${decl} a of b) {
+        }
+        "
+      `)
+    })
+  });
 
   describe("object pattern", () => {
     test("within variable declarator", async () => {
