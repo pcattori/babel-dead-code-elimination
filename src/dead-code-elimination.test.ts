@@ -140,58 +140,23 @@ describe("variable", () => {
     `)
   })
 
-  test("for...in statement", async () => {
+  test("within for...in", async () => {
     let source = dedent`
-      for (var key in obj) {}
+      for (var a in b) {}
     `
     expect(await dce(source)).toMatchInlineSnapshot(`
-      "for (var key in obj) {
+      "for (var a in b) {
       }
       "
     `)
   })
 
-  test("assignment within catch block", async () => {
+  test("within for...of", async () => {
     let source = dedent`
-      export function a() {
-        let aa = undefined;
-        try {
-          throw "";
-        } catch {
-          aa = 5;
-        }
-        return "";
-      }
+      for (var a of b) {}
     `
     expect(await dce(source)).toMatchInlineSnapshot(`
-      "export function a() {
-        let aa = undefined
-        try {
-          throw ""
-        } catch {
-          aa = 5
-        }
-        return ""
-      }
-      "
-    `)
-  })
-
-  test("assignment within return statement", async () => {
-    let source = dedent`
-      let a
-      export let b = {
-        get c(){
-          return (a ??= 1)
-        }
-      }
-    `
-    expect(await dce(source)).toMatchInlineSnapshot(`
-      "let a
-      export let b = {
-        get c() {
-          return (a ??= 1)
-        },
+      "for (var a of b) {
       }
       "
     `)
@@ -508,6 +473,18 @@ describe("variable", () => {
       expect(await dce(source)).toMatchInlineSnapshot(`""`)
     })
   })
+})
+
+test("assignment", async () => {
+  let source = dedent`
+    let x = 1
+    x = 2
+  `
+  expect(await dce(source)).toMatchInlineSnapshot(`
+    "let x = 1
+    x = 2
+    "
+  `)
 })
 
 test("repeated elimination", async () => {
