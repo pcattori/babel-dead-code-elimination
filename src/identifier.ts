@@ -17,5 +17,10 @@ export function isReferenced(ident: NodePath<Babel.Identifier>): boolean {
     return true
   }
 
+  // do not remove `const` / `let` declarations within `for...of` / `for...in` loops
+  if (binding.path.isVariableDeclarator() && (binding.path.parentPath?.parentPath?.isForOfStatement() || binding.path.parentPath?.parentPath?.isForInStatement())) {
+    return true
+  }
+
   return binding.constantViolations.length > 0
 }
