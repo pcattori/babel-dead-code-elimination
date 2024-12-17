@@ -12,6 +12,8 @@ async function format(source: string): Promise<string> {
   return prettier.format(source, { parser: "babel", semi: false })
 }
 
+let DECLARATIONS = ["var", "const", "let"]
+
 let dce = async (source: string): Promise<string> => {
   let ast = parse(source, { sourceType: "module" })
   deadCodeElimination(ast)
@@ -138,9 +140,9 @@ describe("variable", () => {
       ref(x)
       "
     `)
-  });
+  })
 
-  ['var', 'const', 'let'].forEach((decl) => {
+  DECLARATIONS.forEach((decl) => {
     test(`within for...in: ${decl}`, async () => {
       let source = `for (${decl} a in b) {}`
       expect(await dce(source)).toMatchInlineSnapshot(`
@@ -149,9 +151,9 @@ describe("variable", () => {
         "
       `)
     })
-  });
+  })
 
-  ['var', 'const', 'let'].forEach((decl) => {
+  DECLARATIONS.forEach((decl) => {
     test(`within for...of: ${decl}`, async () => {
       let source = `for (${decl} a of b) {}`
 
@@ -161,7 +163,7 @@ describe("variable", () => {
         "
       `)
     })
-  });
+  })
 
   describe("object pattern", () => {
     test("within variable declarator", async () => {
