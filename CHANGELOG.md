@@ -1,5 +1,14 @@
 # babel-dead-code-elimination
 
+## 1.0.8
+
+### Patch Changes
+
+- c653dd3: Do not eliminate `const`- nor `let`-declared for-loop iterator variables
+
+  Previously, only `var`-declared iterator variables were preserved within `for...of` and `for...in` loops.
+  Now, iterator variables declared via `const` and `let` are also preserved.
+
 ## 1.0.7
 
 ### Patch Changes
