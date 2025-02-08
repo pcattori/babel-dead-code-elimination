@@ -33,7 +33,7 @@
     "test": "vitest",
     "changeset": "changeset"
   },
-  "packageManager": "pnpm@9.1.1",
+  "packageManager": "pnpm@10.2.1",
   "devDependencies": {
     "@babel/generator": "^7.23.6",
     "@changesets/cli": "^2.27.2",
