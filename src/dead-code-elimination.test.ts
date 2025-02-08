@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 import { parse } from "@babel/parser"
 import generate from "@babel/generator"
-import dedent from "dedent"
+import ts from "dedent"
 import * as prettier from "prettier"
 
 import { traverse } from "./babel-esm"
@@ -22,7 +22,7 @@ let dce = async (source: string): Promise<string> => {
 
 describe("import", () => {
   test("side-effect", async () => {
-    let source = dedent`
+    let source = ts`
       import "side-effect"
     `
     expect(await dce(source)).toMatchInlineSnapshot(`
@@ -32,7 +32,7 @@ describe("import", () => {
   })
 
   test("named", async () => {
-    let source = dedent`
+    let source = ts`
       import { a, _b } from "named"
       import { _c } from "named-unused"
       console.log(a)
@@ -45,7 +45,7 @@ describe("import", () => {
   })
 
   test("default", async () => {
-    let source = dedent`
+    let source = ts`
       import a from "default-used"
       import _b from "default-unused"
       console.log(a)
@@ -58,7 +58,7 @@ describe("import", () => {
   })
 
   test("namespace", async () => {
-    let source = dedent`
+    let source = ts`
       import * as a from "namespace-used"
       import * as _b from "namespace-unused"
       console.log(a)
@@ -73,7 +73,7 @@ describe("import", () => {
 
 describe("function", () => {
   test("declaration", async () => {
-    let source = dedent`
+    let source = ts`
       export function a() {
         return
       }
@@ -90,7 +90,7 @@ describe("function", () => {
   })
 
   test("expression", async () => {
-    let source = dedent`
+    let source = ts`
       let _a = function () {
         return
       }
@@ -113,7 +113,7 @@ describe("function", () => {
   })
 
   test("arrow", async () => {
-    let source = dedent`
+    let source = ts`
       let _a = () => {}
       let a = () => {}
       ref(a)
@@ -130,7 +130,7 @@ describe("function", () => {
 
 describe("variable", () => {
   test("identifier", async () => {
-    let source = dedent`
+    let source = ts`
       let _x = 1
       let x = 1
       ref(x)
@@ -166,8 +166,20 @@ describe("variable", () => {
   })
 
   describe("object pattern", () => {
+    test("preserves unused variables when rest is used", async () => {
+      let source = ts`
+        let { _a, ...rest } = x
+        ref(rest)
+      `
+      expect(await dce(source)).toMatchInlineSnapshot(`
+        "let { _a, ...rest } = x
+        ref(rest)
+        "
+      `)
+    })
+
     test("within variable declarator", async () => {
-      let source = dedent`
+      let source = ts`
         let { _a, a } = x
         ref(a)
         let {..._rest} = x
@@ -184,7 +196,7 @@ describe("variable", () => {
     })
 
     test("within object property", async () => {
-      let source = dedent`
+      let source = ts`
         let { a: { _aa, aa, ..._rest } } = x
         ref(aa)
       `
@@ -198,7 +210,7 @@ describe("variable", () => {
     })
 
     test("within array pattern", async () => {
-      let source = dedent`
+      let source = ts`
         let { a: [{ _aa, aa, ..._rest }] } = x
         ref(aa)
       `
@@ -213,7 +225,7 @@ describe("variable", () => {
 
     describe("within assignment pattern", () => {
       test("within object property", async () => {
-        let source = dedent`
+        let source = ts`
           let { a: { _aa, aa, ..._rest }={ aa: 1 } } = x
           ref(aa)
         `
@@ -229,7 +241,7 @@ describe("variable", () => {
       })
 
       test("within array pattern", async () => {
-        let source = dedent`
+        let source = ts`
           let { a: [{ _aa, aa, ...rest }={ aa: 1 }] } = x
           ref(aa)
         `
@@ -248,7 +260,7 @@ describe("variable", () => {
     })
 
     test("within rest element", async () => {
-      let source = dedent`
+      let source = ts`
         let [...{ _a, a, ..._rest }] = x
         ref(a)
       `
@@ -261,7 +273,7 @@ describe("variable", () => {
 
     describe("within function param", () => {
       test("within function declaration", async () => {
-        let source = dedent`
+        let source = ts`
           function f(a, {}) { return a; }
           ref(f)
         `
@@ -275,7 +287,7 @@ describe("variable", () => {
       })
 
       test("within function expression", async () => {
-        let source = dedent`
+        let source = ts`
           const f = function(a, {}) { return a }
           ref(f)
         `
@@ -289,7 +301,7 @@ describe("variable", () => {
       })
 
       test("within object method", async () => {
-        let source = dedent`
+        let source = ts`
           const a = {
             f(a, {}) { return a }
           }
@@ -307,7 +319,7 @@ describe("variable", () => {
       })
 
       test("within arrow function expression", async () => {
-        let source = dedent`
+        let source = ts`
           let f = (a, {}) => a
           ref(f)
         `
@@ -319,7 +331,7 @@ describe("variable", () => {
       })
 
       test("within class method", async () => {
-        let source = dedent`
+        let source = ts`
           class A {
             f(a, {}) { return a }
           }
@@ -337,7 +349,7 @@ describe("variable", () => {
       })
 
       test("within class private method", async () => {
-        let source = dedent`
+        let source = ts`
           class A {
             #f(a, {}) { return a }
           }
@@ -356,7 +368,7 @@ describe("variable", () => {
     })
 
     test("unzips if all variables are unused", async () => {
-      let source = dedent`
+      let source = ts`
         let {
           _a, // Identifier
           _b: {_bb, ..._brest}, // within ObjectProperty
@@ -373,7 +385,7 @@ describe("variable", () => {
 
   describe("array pattern", () => {
     test("within variable declarator", async () => {
-      let source = dedent`
+      let source = ts`
         let [ _a0, a1, _a2, a3, _a4 ] = x
         ref(a1, a3)
         let [..._rest] = x
@@ -390,7 +402,7 @@ describe("variable", () => {
     })
 
     test("within object property", async () => {
-      let source = dedent`
+      let source = ts`
         let { a: [ _aa, aa, ..._rest ] } = x
         ref(aa)
       `
@@ -404,7 +416,7 @@ describe("variable", () => {
     })
 
     test("within array pattern", async () => {
-      let source = dedent`
+      let source = ts`
         let [[ _aa, aa, ..._rest ]] = x
         ref(aa)
       `
@@ -417,7 +429,7 @@ describe("variable", () => {
 
     describe("within assignment pattern", () => {
       test("within object property", async () => {
-        let source = dedent`
+        let source = ts`
           let { a: { _aa, aa, ..._rest }={ aa: 1 } } = x
           ref(aa)
         `
@@ -433,7 +445,7 @@ describe("variable", () => {
       })
 
       test("within array pattern", async () => {
-        let source = dedent`
+        let source = ts`
           let [{ _a, a, ...rest }={ a: 1 }] = x
           ref(a)
         `
@@ -450,7 +462,7 @@ describe("variable", () => {
     })
 
     test("within rest element", async () => {
-      let source = dedent`
+      let source = ts`
         let [...[ _a, a, ..._rest ]] = x
         ref(a)
       `
@@ -462,7 +474,7 @@ describe("variable", () => {
     })
 
     test("unzips if all variables are unused", async () => {
-      let source = dedent`
+      let source = ts`
         let [
           _a, // Identifier
           {_b, ..._brest}, // within ObjectProperty
@@ -479,7 +491,7 @@ describe("variable", () => {
 })
 
 test("assignment", async () => {
-  let source = dedent`
+  let source = ts`
     let x = 1
     x = 2
   `
@@ -491,7 +503,7 @@ test("assignment", async () => {
 })
 
 test("repeated elimination", async () => {
-  let source = dedent`
+  let source = ts`
     import { a } from "named"
     import b from "default"
     import * as c from "namespace"
@@ -523,7 +535,7 @@ test("repeated elimination", async () => {
 })
 
 test("only eliminates newly unreferenced identifiers", async () => {
-  let source = dedent`
+  let source = ts`
     let alwaysUnreferenced = 1
 
     let newlyUnreferenced = 2
