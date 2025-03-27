@@ -20,6 +20,7 @@ export default function (
 
   let shouldBeRemoved = (ident: NodePath<Babel.Identifier>) => {
     if (Identifier.isReferenced(ident)) return false
+    if (candidates && !candidates.has(ident)) return false
 
     // Preserve unused variables in object patterns when rest element is used
     // For example, in `let { a, ...rest } = ...` even if `a` is unused

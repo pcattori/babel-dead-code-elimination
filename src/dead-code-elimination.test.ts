@@ -543,6 +543,8 @@ test("only eliminates newly unreferenced identifiers", async () => {
 
     let alwaysReferenced = 3
     console.log(alwaysReferenced)
+
+    let { unreferencedInObjectPattern } = { unreferencedInObjectPattern: 4 }
   `
 
   let ast = parse(source, { sourceType: "module" })
@@ -557,6 +559,9 @@ test("only eliminates newly unreferenced identifiers", async () => {
     "let alwaysUnreferenced = 1
     let alwaysReferenced = 3
     console.log(alwaysReferenced)
+    let { unreferencedInObjectPattern } = {
+      unreferencedInObjectPattern: 4,
+    }
     "
   `)
 })
