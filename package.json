@@ -1,6 +1,6 @@
 {
   "name": "babel-dead-code-elimination",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Composable primitives for dead code elimination in Babel",
   "keywords": [
     "babel",
