@@ -35,11 +35,11 @@ describe("import", () => {
     let source = ts`
       import { a, _b } from "named"
       import { _c } from "named-unused"
-      console.log(a)
+      ref(a)
     `
     expect(await dce(source)).toMatchInlineSnapshot(`
       "import { a } from "named"
-      console.log(a)
+      ref(a)
       "
     `)
   })
@@ -48,11 +48,11 @@ describe("import", () => {
     let source = ts`
       import a from "default-used"
       import _b from "default-unused"
-      console.log(a)
+      ref(a)
     `
     expect(await dce(source)).toMatchInlineSnapshot(`
       "import a from "default-used"
-      console.log(a)
+      ref(a)
       "
     `)
   })
@@ -61,11 +61,11 @@ describe("import", () => {
     let source = ts`
       import * as a from "namespace-used"
       import * as _b from "namespace-unused"
-      console.log(a)
+      ref(a)
     `
     expect(await dce(source)).toMatchInlineSnapshot(`
       "import * as a from "namespace-used"
-      console.log(a)
+      ref(a)
       "
     `)
   })
@@ -174,6 +174,27 @@ describe("variable", () => {
       expect(await dce(source)).toMatchInlineSnapshot(`
         "let { _a, ...rest } = x
         ref(rest)
+        "
+      `)
+    })
+
+    test("only eliminates candidates", async () => {
+      let source = ts`
+        let { alwaysUnreferenced, newlyUnreferenced, alwaysReferenced } = x
+        ref(alwaysReferenced)
+        export default newlyUnreferenced
+      `
+      let ast = parse(source, { sourceType: "module" })
+      let referenced = findReferencedIdentifiers(ast)
+      traverse(ast, {
+        ExportDefaultDeclaration(path) {
+          path.remove()
+        },
+      })
+      deadCodeElimination(ast, referenced)
+      expect(await format(generate(ast).code)).toMatchInlineSnapshot(`
+        "let { alwaysUnreferenced, alwaysReferenced } = x
+        ref(alwaysReferenced)
         "
       `)
     })
@@ -525,11 +546,11 @@ test("repeated elimination", async () => {
     let { i } = g
 
     export let j = "j"
-    console.log("k")
+    ref("k")
   `
   expect(await dce(source)).toMatchInlineSnapshot(`
     "export let j = "j"
-    console.log("k")
+    ref("k")
     "
   `)
 })
@@ -542,7 +563,7 @@ test("only eliminates newly unreferenced identifiers", async () => {
     export default newlyUnreferenced
 
     let alwaysReferenced = 3
-    console.log(alwaysReferenced)
+    ref(alwaysReferenced)
   `
 
   let ast = parse(source, { sourceType: "module" })
@@ -556,7 +577,7 @@ test("only eliminates newly unreferenced identifiers", async () => {
   expect(await format(generate(ast).code)).toMatchInlineSnapshot(`
     "let alwaysUnreferenced = 1
     let alwaysReferenced = 3
-    console.log(alwaysReferenced)
+    ref(alwaysReferenced)
     "
   `)
 })

@@ -13,7 +13,7 @@ const findReferencedNames = (source: string): string[] => {
 test("import:named", () => {
   let source = dedent`
     import { referenced, unreferenced } from "pkg"
-    console.log(referenced)
+    ref(referenced)
   `
   expect(findReferencedNames(source)).toStrictEqual(["referenced"])
 })
@@ -22,7 +22,7 @@ test("import:default", () => {
   let source = dedent`
     import referenced from "referenced-pkg"
     import unreferenced from "unreferenced-pkg"
-    console.log(referenced)
+    ref(referenced)
   `
   expect(findReferencedNames(source)).toStrictEqual(["referenced"])
 })
@@ -31,7 +31,7 @@ test("import:namespace", () => {
   let source = dedent`
     import * as referenced from "referenced-pkg"
     import * as unreferenced from "unreferenced-pkg"
-    console.log(referenced)
+    ref(referenced)
   `
   expect(findReferencedNames(source)).toStrictEqual(["referenced"])
 })
@@ -39,7 +39,7 @@ test("import:namespace", () => {
 test("function:declaration", () => {
   let source = dedent`
     function referenced() {}
-    console.log(referenced)
+    ref(referenced)
 
     function unreferenced() {}
   `
@@ -49,7 +49,7 @@ test("function:declaration", () => {
 test("function:expression", () => {
   let source = dedent`
     let referenced = function () {}
-    console.log(referenced)
+    ref(referenced)
 
     let unreferened = function () {}
   `
@@ -59,7 +59,7 @@ test("function:expression", () => {
 test("function:arrow", () => {
   let source = dedent`
     let referenced = () => {}
-    console.log(referenced)
+    ref(referenced)
 
     let unreferened = () => {}
   `
@@ -69,7 +69,7 @@ test("function:arrow", () => {
 test("variable:identifier", () => {
   let source = dedent`
     let referenced = 1
-    console.log(referenced)
+    ref(referenced)
 
     let unreferenced = 2
   `
@@ -79,7 +79,7 @@ test("variable:identifier", () => {
 test("variable:object pattern", () => {
   let source = dedent`
     let { referenced, unreferenced } = thing
-    console.log(referenced)
+    ref(referenced)
   `
   expect(findReferencedNames(source)).toStrictEqual(["referenced"])
 })
@@ -87,7 +87,7 @@ test("variable:object pattern", () => {
 test("variable:array pattern", () => {
   let source = dedent`
     let [ referenced, unreferenced ] = thing
-    console.log(referenced)
+    ref(referenced)
   `
   expect(findReferencedNames(source)).toStrictEqual(["referenced"])
 })
