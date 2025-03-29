@@ -1,5 +1,11 @@
 # babel-dead-code-elimination
 
+## 1.0.10
+
+### Patch Changes
+
+- 698706a: Respect candidates within when eliminating unreferenced identifiers in an object pattern
+
 ## 1.0.9
 
 ### Patch Changes
