@@ -4,10 +4,13 @@ import {
   type NodePath,
   type Babel,
   type ParseResult,
+  type Binding,
 } from "./babel-esm"
-import * as Identifier from "./identifier"
 import * as Pattern from "./pattern"
 import { unexpected } from "./errors"
+import findRemovableBindings, {
+  isLoopIteratorBinding,
+} from "./find-removable-bindings"
 
 /**
  * @param candidates - If provided, only these identifiers will be candidates for dead code elimination.
@@ -18,23 +21,36 @@ export default function (
 ) {
   let removals: number
 
-  let shouldBeRemoved = (ident: NodePath<Babel.Identifier>) => {
-    if (candidates && !candidates.has(ident)) return false
-    if (Identifier.isReferenced(ident)) return false
+  // Bindings that form closed cycles (SCCs) with no external references
+  let removableBindings = new Set<Binding>()
+
+  const hasCandidates = candidates && candidates.size > 0
+  const shouldBeRemoved = (ident: NodePath<Babel.Identifier>): boolean => {
+    if (hasCandidates && !candidates.has(ident)) return false
+
+    const binding = ident.scope.getBinding(ident.node.name)
+
+    // If binding is part of a removable cycle, allow removal
+    if (binding && removableBindings.has(binding)) return true
+
+    if (binding?.referenced) return false
+
+    // Preserve bindings with constant violations (assignments like x = 2)
+    if (binding && binding.constantViolations.length > 0) return false
+
+    // Preserve loop iterator bindings (for...of, for...in)
+    if (binding && isLoopIteratorBinding(binding)) return false
 
     // Preserve unused variables in object patterns when rest element is used
     // For example, in `let { a, ...rest } = ...` even if `a` is unused
     // it needs to remain in the object pattern so that `a` is filtered out of `rest`
-    if (ident.parentPath.parentPath?.isObjectPattern()) {
+    const grandParent = ident.parentPath.parentPath
+    if (grandParent?.isObjectPattern()) {
       if (ident.parentPath.isRestElement()) return true
-      return !ident.parentPath.parentPath
-        .get("properties")
-        .at(-1)
-        ?.isRestElement()
+      return !grandParent.get("properties").at(-1)?.isRestElement()
     }
 
-    if (!candidates) return true
-    return candidates.has(ident)
+    return !hasCandidates || candidates.has(ident)
   }
 
   do {
@@ -43,6 +59,7 @@ export default function (
     traverse(ast, {
       Program(path) {
         path.scope.crawl()
+        removableBindings = findRemovableBindings(path)
       },
       ImportDeclaration(path) {
         let removalsBefore = removals

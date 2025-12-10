@@ -30,7 +30,8 @@
   "scripts": {
     "typecheck": "tsc",
     "build": "tsup",
-    "test": "vitest",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "changeset": "changeset"
   },
   "packageManager": "pnpm@10.2.1",
