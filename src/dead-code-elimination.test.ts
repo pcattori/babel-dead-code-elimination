@@ -69,6 +69,78 @@ describe("import", () => {
       "
     `)
   })
+
+  test("mixed default and named: only named used", async () => {
+    let source = ts`
+      import a, { b, c } from "pkg"
+      ref(b)
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "import { b } from "pkg"
+      ref(b)
+      "
+    `)
+  })
+
+  test("mixed default and named: only default used", async () => {
+    let source = ts`
+      import a, { b, c } from "pkg"
+      ref(a)
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "import a from "pkg"
+      ref(a)
+      "
+    `)
+  })
+
+  test("mixed default and named: none used", async () => {
+    let source = ts`
+      import a, { b } from "pkg"
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`""`)
+  })
+})
+
+describe("export", () => {
+  test("export specifier prevents elimination", async () => {
+    let source = ts`
+      const foo = 1
+      const bar = 2
+      export { foo }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "const foo = 1
+      export { foo }
+      "
+    `)
+  })
+
+  test("export with alias prevents elimination", async () => {
+    let source = ts`
+      const foo = 1
+      const bar = 2
+      export { foo as baz }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "const foo = 1
+      export { foo as baz }
+      "
+    `)
+  })
+
+  test("export default expression prevents elimination", async () => {
+    let source = ts`
+      const foo = 1
+      const bar = 2
+      export default foo
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "const foo = 1
+      export default foo
+      "
+    `)
+  })
 })
 
 describe("function", () => {
@@ -551,6 +623,21 @@ test("repeated elimination", async () => {
   expect(await dce(source)).toMatchInlineSnapshot(`
     "export let j = "j"
     ref("k")
+    "
+  `)
+})
+
+test("empty candidates set behaves like undefined (eliminates all unreferenced)", async () => {
+  let source = ts`
+    let unused = 1
+    let used = 2
+    ref(used)
+  `
+  let ast = parse(source, { sourceType: "module" })
+  deadCodeElimination(ast, new Set())
+  expect(await format(generate(ast).code)).toMatchInlineSnapshot(`
+    "let used = 2
+    ref(used)
     "
   `)
 })

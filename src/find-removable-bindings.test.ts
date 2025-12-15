@@ -126,6 +126,81 @@ test("n=3: linear chain no cycle -> none removable", () => {
   expect(names).toEqual([])
 })
 
+test("n=3: A↔B mutual, A→C (C unused) -> A-B removable", () => {
+  // A and B reference each other, A also calls C, but C is not in cycle
+  let source = dedent`
+    function a() { b(); c() }
+    function b() { return a() }
+    function c() { return 1 }
+  `
+  let names = findRemovableNames(source)
+  // A-B form closed cycle (no external refs into them)
+  // C is not in a cycle and has incoming from A, so not removable
+  expect(names.sort()).toEqual(["a", "b"])
+})
+
+test("n=3: A↔B mutual, C→A -> A-B NOT removable", () => {
+  let source = dedent`
+    function a() { return b() }
+    function b() { return a() }
+    function c() { return a() }
+  `
+  let names = findRemovableNames(source)
+  // C references A, so A-B has incoming edge -> not removable
+  expect(names).toEqual([])
+})
+
+test("n=3: A↔B mutual, C→B (not A) -> A-B NOT removable", () => {
+  let source = dedent`
+    function a() { return b() }
+    function b() { return a() }
+    function c() { return b() }
+  `
+  let names = findRemovableNames(source)
+  expect(names).toEqual([])
+})
+
+test("n=3: three independent self-refs -> all removable", () => {
+  let source = dedent`
+    function a() { return a() }
+    function b() { return b() }
+    function c() { return c() }
+  `
+  let names = findRemovableNames(source)
+  expect(names.sort()).toEqual(["a", "b", "c"])
+})
+
+test("n=3: A→A self, B↔C mutual -> all removable", () => {
+  let source = dedent`
+    function a() { return a() }
+    function b() { return c() }
+    function c() { return b() }
+  `
+  let names = findRemovableNames(source)
+  expect(names.sort()).toEqual(["a", "b", "c"])
+})
+
+test("n=3: A→B, B→C, no cycle -> none removable", () => {
+  let source = dedent`
+    function a() { return b() }
+    function b() { return c() }
+    function c() { return 1 }
+  `
+  let names = findRemovableNames(source)
+  expect(names).toEqual([])
+})
+
+test("n=3: reverse triangle A←B←C←A -> all removable", () => {
+  let source = dedent`
+    function a() { return c() }
+    function b() { return a() }
+    function c() { return b() }
+  `
+  let names = findRemovableNames(source)
+  expect(names.sort()).toEqual(["a", "b", "c"])
+})
+
+
 test("n=4: two separate SCCs -> both cycles removable", () => {
   let source = dedent`
     function a() { return b() }
