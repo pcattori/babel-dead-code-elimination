@@ -4,7 +4,7 @@ import generate from "@babel/generator"
 import ts from "dedent"
 import * as prettier from "prettier"
 
-import { traverse } from "./babel-esm"
+import { traverse, Babel } from "./babel-esm"
 import deadCodeElimination from "./dead-code-elimination"
 import findReferencedIdentifiers from "./find-referenced-identifiers"
 
@@ -66,6 +66,78 @@ describe("import", () => {
     expect(await dce(source)).toMatchInlineSnapshot(`
       "import * as a from "namespace-used"
       ref(a)
+      "
+    `)
+  })
+
+  test("mixed default and named: only named used", async () => {
+    let source = ts`
+      import a, { b, c } from "pkg"
+      ref(b)
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "import { b } from "pkg"
+      ref(b)
+      "
+    `)
+  })
+
+  test("mixed default and named: only default used", async () => {
+    let source = ts`
+      import a, { b, c } from "pkg"
+      ref(a)
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "import a from "pkg"
+      ref(a)
+      "
+    `)
+  })
+
+  test("mixed default and named: none used", async () => {
+    let source = ts`
+      import a, { b } from "pkg"
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`""`)
+  })
+})
+
+describe("export", () => {
+  test("export specifier prevents elimination", async () => {
+    let source = ts`
+      const foo = 1
+      const bar = 2
+      export { foo }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "const foo = 1
+      export { foo }
+      "
+    `)
+  })
+
+  test("export with alias prevents elimination", async () => {
+    let source = ts`
+      const foo = 1
+      const bar = 2
+      export { foo as baz }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "const foo = 1
+      export { foo as baz }
+      "
+    `)
+  })
+
+  test("export default expression prevents elimination", async () => {
+    let source = ts`
+      const foo = 1
+      const bar = 2
+      export default foo
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "const foo = 1
+      export default foo
       "
     `)
   })
@@ -555,6 +627,21 @@ test("repeated elimination", async () => {
   `)
 })
 
+test("empty candidates set behaves like undefined (eliminates all unreferenced)", async () => {
+  let source = ts`
+    let unused = 1
+    let used = 2
+    ref(used)
+  `
+  let ast = parse(source, { sourceType: "module" })
+  deadCodeElimination(ast, new Set())
+  expect(await format(generate(ast).code)).toMatchInlineSnapshot(`
+    "let used = 2
+    ref(used)
+    "
+  `)
+})
+
 test("only eliminates newly unreferenced identifiers", async () => {
   let source = ts`
     let alwaysUnreferenced = 1
@@ -580,4 +667,253 @@ test("only eliminates newly unreferenced identifiers", async () => {
     ref(alwaysReferenced)
     "
   `)
+})
+
+test("circular references", async () => {
+  let source = ts`
+    export function y () {
+      return x()
+    }
+    export function x() { return y() }
+    export const z = 1
+  `
+
+  let ast = parse(source, { sourceType: "module" })
+  let referenced = findReferencedIdentifiers(ast)
+
+  ast.program.body = ast.program.body.map((node) => {
+    if (Babel.isExportNamedDeclaration(node)) {
+      if (Babel.isFunctionDeclaration(node.declaration)) {
+        return node.declaration
+      }
+    }
+    return node
+  })
+  deadCodeElimination(ast, referenced)
+  expect(await format(generate(ast).code)).toMatchInlineSnapshot(`
+    "export const z = 1
+    "
+  `)
+})
+
+test("unexported circular references", async () => {
+  let source = ts`
+    function y() {
+      return x()
+    }
+    function x() { return y() }
+    export const z = 1
+  `
+
+  let ast = parse(source, { sourceType: "module" })
+  let referenced = findReferencedIdentifiers(ast)
+  deadCodeElimination(ast, referenced)
+  expect(await format(generate(ast).code)).toMatchInlineSnapshot(`
+    "function y() {
+      return x()
+    }
+    function x() {
+      return y()
+    }
+    export const z = 1
+    "
+  `)
+})
+
+describe("SCC dead code elimination", () => {
+  test("mutual recursion without external refs -> removed", async () => {
+    let source = ts`
+      function a() { return b() }
+      function b() { return a() }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`""`)
+  })
+
+  test("mutual recursion with external ref -> preserved", async () => {
+    let source = ts`
+      function a() { return b() }
+      function b() { return a() }
+      ref(b)
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "function a() {
+        return b()
+      }
+      function b() {
+        return a()
+      }
+      ref(b)
+      "
+    `)
+  })
+
+  test("self-recursive function unused -> removed", async () => {
+    let source = ts`
+      function a() { return a() }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`""`)
+  })
+
+  test("self-recursive function used -> preserved", async () => {
+    let source = ts`
+      function a() { return a() }
+      ref(a)
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "function a() {
+        return a()
+      }
+      ref(a)
+      "
+    `)
+  })
+
+  test("linear chain no cycle -> all removed", async () => {
+    let source = ts`
+      function a() { return b() }
+      function b() { return c() }
+      function c() { return 1 }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`""`)
+  })
+
+  test("linear chain with tail used -> all preserved", async () => {
+    let source = ts`
+      function a() { return b() }
+      function b() { return c() }
+      function c() { return 1 }
+      ref(c)
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "function c() {
+        return 1
+      }
+      ref(c)
+      "
+    `)
+  })
+
+  test("triangle cycle -> all removed", async () => {
+    let source = ts`
+      function a() { return b() }
+      function b() { return c() }
+      function c() { return a() }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`""`)
+  })
+
+  test("two separate SCCs -> both removed", async () => {
+    let source = ts`
+      function a() { return b() }
+      function b() { return a() }
+      function c() { return d() }
+      function d() { return c() }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`""`)
+  })
+
+  test("two separate SCCs, one used -> one preserved", async () => {
+    let source = ts`
+      function a() { return b() }
+      function b() { return a() }
+      function c() { return d() }
+      function d() { return c() }
+      ref(a)
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "function a() {
+        return b()
+      }
+      function b() {
+        return a()
+      }
+      ref(a)
+      "
+    `)
+  })
+
+  test("SCC with external caller removed first -> SCC then removed", async () => {
+    let source = ts`
+      function a() { return b() }
+      function b() { return a() }
+      function c() { return a() }
+    `
+    // c is unused -> removed first, then a-b cycle has no refs -> removed
+    expect(await dce(source)).toMatchInlineSnapshot(`""`)
+  })
+
+  test("SCC with external caller used -> all preserved", async () => {
+    let source = ts`
+      function a() { return b() }
+      function b() { return a() }
+      function c() { return a() }
+      ref(c)
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "function a() {
+        return b()
+      }
+      function b() {
+        return a()
+      }
+      function c() {
+        return a()
+      }
+      ref(c)
+      "
+    `)
+  })
+
+  test("large cycle (5 nodes) -> all removed", async () => {
+    let source = ts`
+      function a() { return b() }
+      function b() { return c() }
+      function c() { return d() }
+      function d() { return e() }
+      function e() { return a() }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`""`)
+  })
+
+  test("mixed: self-ref + cycle + used -> correct elimination", async () => {
+    let source = ts`
+      function selfOnly() { return selfOnly() }
+      function cycleA() { return cycleB() }
+      function cycleB() { return cycleA() }
+      function used() { return 1 }
+      ref(used)
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`
+      "function used() {
+        return 1
+      }
+      ref(used)
+      "
+    `)
+  })
+
+  test("cycle with self-loop inside -> removed", async () => {
+    let source = ts`
+      function a() { a(); return b() }
+      function b() { return a() }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`""`)
+  })
+
+  test("arrow functions in mutual recursion -> removed", async () => {
+    let source = ts`
+      const a = () => b()
+      const b = () => a()
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`""`)
+  })
+
+  test("mixed function types in cycle -> removed", async () => {
+    let source = ts`
+      function a() { return b() }
+      const b = () => c()
+      const c = function() { return a() }
+    `
+    expect(await dce(source)).toMatchInlineSnapshot(`""`)
+  })
 })

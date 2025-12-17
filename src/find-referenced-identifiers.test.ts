@@ -91,3 +91,13 @@ test("variable:array pattern", () => {
   `
   expect(findReferencedNames(source)).toStrictEqual(["referenced"])
 })
+
+test("circular references", () => {
+  let source = dedent`
+    function y () {
+      return x()
+    }
+    function x() { return y() }
+  `
+  expect(findReferencedNames(source)).toStrictEqual([])
+})

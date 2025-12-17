@@ -3,44 +3,56 @@ import {
   type NodePath,
   type Babel,
   type ParseResult,
+  type Binding,
 } from "./babel-esm"
-import * as Identifier from "./identifier"
 import * as Pattern from "./pattern"
+import findRemovableBindings from "./find-removable-bindings"
+
+/** Check if binding is referenced and not removable, then add to set */
+function addIfReferenced(
+  ident: NodePath<Babel.Identifier>,
+  removable: Set<Binding>,
+  referenced: Set<NodePath<Babel.Identifier>>,
+): void {
+  const binding = ident.scope.getBinding(ident.node.name)
+  if (binding && !removable.has(binding) && binding.referenced) {
+    referenced.add(ident)
+  }
+}
 
 export default function (
   ast: ParseResult<Babel.File>,
 ): Set<NodePath<Babel.Identifier>> {
   const referenced = new Set<NodePath<Babel.Identifier>>()
+  let removable: Set<Binding>
 
   traverse(ast, {
+    Program(path) {
+      path.scope.crawl()
+      removable = findRemovableBindings(path)
+    },
     ImportDeclaration(path) {
-      for (let specifier of path.get("specifiers")) {
-        let local = specifier.get("local")
-        if (Identifier.isReferenced(local)) {
-          referenced.add(local)
-        }
+      for (const specifier of path.get("specifiers")) {
+        addIfReferenced(specifier.get("local"), removable, referenced)
       }
     },
     VariableDeclarator(path) {
-      let id = path.get("id")
+      const id = path.get("id")
       if (id.isIdentifier()) {
-        if (Identifier.isReferenced(id)) {
-          referenced.add(id)
-        }
+        addIfReferenced(id, removable, referenced)
       } else if (id.isObjectPattern() || id.isArrayPattern()) {
-        for (let variable of Pattern.findVariables(id)) {
-          if (Identifier.isReferenced(variable)) {
-            referenced.add(variable)
-          }
+        for (const variable of Pattern.findVariables(id)) {
+          addIfReferenced(variable, removable, referenced)
         }
       }
     },
     FunctionDeclaration(path) {
-      let id = path.get("id")
-      if (id.isIdentifier() && Identifier.isReferenced(id)) {
-        referenced.add(id)
+      const id = path.get("id")
+      if (id.isIdentifier()) {
+        addIfReferenced(id, removable, referenced)
       }
     },
   })
+
   return referenced
 }
