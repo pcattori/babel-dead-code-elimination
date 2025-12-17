@@ -1,5 +1,11 @@
 # babel-dead-code-elimination
 
+## 1.0.11
+
+### Patch Changes
+
+- e67481b: Detect and eliminate circular references
+
 ## 1.0.10
 
 ### Patch Changes
