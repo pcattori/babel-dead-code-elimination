@@ -2,4 +2,4 @@
 "babel-dead-code-elimination": patch
 ---
 
-correctly eliminate circular references
+Detect and eliminate circular references
