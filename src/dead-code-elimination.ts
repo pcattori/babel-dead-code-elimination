@@ -24,7 +24,7 @@ export default function (
   // Bindings that form closed cycles (SCCs) with no external references
   let removableBindings = new Set<Binding>()
 
-  const hasCandidates = candidates && candidates.size > 0
+  const hasCandidates = candidates !== undefined
   const shouldBeRemoved = (ident: NodePath<Babel.Identifier>): boolean => {
     if (hasCandidates && !candidates.has(ident)) return false
 
@@ -50,7 +50,8 @@ export default function (
       return !grandParent.get("properties").at(-1)?.isRestElement()
     }
 
-    return !hasCandidates || candidates.has(ident)
+    if (hasCandidates) return candidates.has(ident)
+    return true
   }
 
   do {
