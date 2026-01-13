@@ -1,5 +1,11 @@
 # babel-dead-code-elimination
 
+## 1.0.12
+
+### Patch Changes
+
+- 523872b: Fix so that empty candidate are treated as "don't eliminate anything"
+
 ## 1.0.11
 
 ### Patch Changes
