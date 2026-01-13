@@ -627,7 +627,7 @@ test("repeated elimination", async () => {
   `)
 })
 
-test("empty candidates set behaves like undefined (eliminates all unreferenced)", async () => {
+test("empty candidates set keeps all identifiers", async () => {
   let source = ts`
     let unused = 1
     let used = 2
@@ -636,7 +636,8 @@ test("empty candidates set behaves like undefined (eliminates all unreferenced)"
   let ast = parse(source, { sourceType: "module" })
   deadCodeElimination(ast, new Set())
   expect(await format(generate(ast).code)).toMatchInlineSnapshot(`
-    "let used = 2
+    "let unused = 1
+    let used = 2
     ref(used)
     "
   `)
@@ -916,4 +917,21 @@ describe("SCC dead code elimination", () => {
     `
     expect(await dce(source)).toMatchInlineSnapshot(`""`)
   })
+})
+
+
+test("everything is unreferenced, nothing is removed", async () => {
+  let source = ts`
+   function a() {}
+   function b() {}
+  `
+
+  let ast = parse(source, { sourceType: "module" })
+  let referenced = findReferencedIdentifiers(ast)
+  deadCodeElimination(ast, referenced)
+  expect(await format(generate(ast).code)).toMatchInlineSnapshot(`
+    "function a() {}
+    function b() {}
+    "
+  `)
 })
