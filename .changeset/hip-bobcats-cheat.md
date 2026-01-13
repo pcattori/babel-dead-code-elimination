@@ -2,4 +2,4 @@
 "babel-dead-code-elimination": patch
 ---
 
-fix: empty candidates Set shall keep everything
+Fix so that empty candidate are treated as "don't eliminate anything"
