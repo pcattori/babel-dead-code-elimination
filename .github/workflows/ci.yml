@@ -55,6 +55,6 @@ jobs:
         with:
           title: Release
           commit: release
-          publish: pnpm dlx @changesets/cli publish --provenance
+          publish: pnpm exec changeset publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
