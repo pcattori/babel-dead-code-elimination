@@ -1,5 +1,11 @@
 # babel-dead-code-elimination
 
+## 2.0.0
+
+### Major Changes
+
+- bd9a136: Ship ESM only now that [all Node LTS versions support `require(esm)`](https://nodejs.org/api/modules.html#loading-ecmascript-modules-using-require)
+
 ## 1.0.12
 
 ### Patch Changes
