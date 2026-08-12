@@ -14,7 +14,7 @@ npm install babel-dead-code-elimination
 
 ## Usage
 
-You have a Babel AST and need to transform it before handing it back to Babel: 
+You have a Babel AST and want to transform it:
 
 ```ts
 import type { ParseResult } from "@babel/parser"
@@ -22,9 +22,8 @@ import type { File } from "@babel/types"
 
 type AST = ParseResult<File>
 
-export function transform(ast: AST): AST {
-  // your code here
-  return ast
+export function transform(ast: AST) {
+  // your code to mutate the AST goes here...
 }
 ```
 
@@ -38,9 +37,8 @@ Use `deadCodeElimination` when you want to remove unreferenced identifiers:
 ```ts
 import { deadCodeElimination } from "babel-dead-code-elimination"
 
-export function transform(ast: Ast): Ast {
+export function transform(ast: AST) {
   deadCodeElimination(ast)
-  return ast
 }
 ```
 
@@ -80,16 +78,14 @@ import {
   findReferencedIdentifiers,
 } from "babel-dead-code-elimination"
 
-export function transform(ast: Ast): Ast {
-  let referenced = findReferencedIdentifiers(ast)
+export function transform(ast: AST) {
+  const referenced = findReferencedIdentifiers(ast)
 
   traverse(ast, {
     // your custom transform goes here
   })
 
   deadCodeElimination(ast, referenced)
-
-  return ast
 }
 ```
 
