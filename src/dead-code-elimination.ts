@@ -40,16 +40,22 @@ export default function (
 
     const binding = ident.scope.getBinding(ident.node.name)
 
-    // If binding is part of a removable cycle, allow removal
-    if (binding && removableBindings.has(binding)) return true
+    // Only remove a declaration whose own binding is known. Removing a sole
+    // declarator also removes its declaration, and Babel deletes the name
+    // from scope for both, so the second deletion can drop a same-named
+    // binding of an enclosing scope until the next crawl.
+    if (binding?.identifier !== ident.node) return false
 
-    if (binding?.referenced) return false
+    // If binding is part of a removable cycle, allow removal
+    if (removableBindings.has(binding)) return true
+
+    if (binding.referenced) return false
 
     // Preserve bindings with constant violations (assignments like x = 2)
-    if (binding && binding.constantViolations.length > 0) return false
+    if (binding.constantViolations.length > 0) return false
 
     // Preserve loop iterator bindings (for...of, for...in)
-    if (binding && isLoopIteratorBinding(binding)) return false
+    if (isLoopIteratorBinding(binding)) return false
 
     return true
   }
