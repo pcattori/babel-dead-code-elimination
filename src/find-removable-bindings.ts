@@ -8,7 +8,7 @@ export default function findRemovableBindings(
   const n = allBindings.length
   if (n === 0) return new Set()
 
-  // Build a graph of bindings for cycle detection (used by shortcuts and Tarjan's algorithm)
+  // Build a graph of bindings for cycle detection (Tarjan's algorithm)
   // if binding `a` is referenced inside binding `b`'s definition, refs[b] contains a
   // Map each binding's declaration node to its index for fast lookup when tracing refs
   const pathNodeToIdx = new Map<Babel.Node, number>()
@@ -83,88 +83,8 @@ export default function findRemovableBindings(
 
   if (candidateCount === 0) return new Set()
 
-  // Small candidate shortcuts (avoid Tarjan overhead for simple cases)
-  if (candidateCount <= 3) {
-    const candidates: number[] = []
-    for (let i = 0; i < n && candidates.length < candidateCount; i++) {
-      if (!excluded[i]) candidates.push(i)
-    }
-
-    // n=1 shortcut: single candidate is removable only if self-referencing
-    if (candidateCount === 1) {
-      const idx = candidates[0]!
-      return refs[idx]?.includes(idx) ? new Set([allBindings[idx]!]) : new Set()
-    }
-
-    // n=2 shortcut: check for mutual recursion or self-refs
-    if (candidateCount === 2) {
-      const [aIdx, bIdx] = candidates as [number, number]
-
-      // Mutual recursion: both reference each other
-      const aRefs = refs[aIdx]
-      const bRefs = refs[bIdx]
-      const aRefsB = aRefs?.includes(bIdx)
-      const bRefsA = bRefs?.includes(aIdx)
-
-      if (aRefsB && bRefsA) {
-        return new Set([allBindings[aIdx]!, allBindings[bIdx]!])
-      }
-
-      // Otherwise only self-referencing ones are removable
-      const result = new Set<Binding>()
-      if (aRefs?.includes(aIdx)) result.add(allBindings[aIdx]!)
-      if (bRefs?.includes(bIdx)) result.add(allBindings[bIdx]!)
-      return result
-    }
-
-    // n=3 shortcut: check for triangle cycle, pair cycles, or self-refs
-    const [aIdx, bIdx, cIdx] = candidates as [number, number, number]
-
-    const aRefs = refs[aIdx]
-    const bRefs = refs[bIdx]
-    const cRefs = refs[cIdx]
-
-    const aRefsB = aRefs?.includes(bIdx),
-      aRefsC = aRefs?.includes(cIdx)
-    const bRefsA = bRefs?.includes(aIdx),
-      bRefsC = bRefs?.includes(cIdx)
-    const cRefsA = cRefs?.includes(aIdx),
-      cRefsB = cRefs?.includes(bIdx)
-
-    // Triangle: A→B→C→A or A→C→B→A (any cycle involving all 3)
-    if ((aRefsB && bRefsC && cRefsA) || (aRefsC && cRefsB && bRefsA)) {
-      return new Set([
-        allBindings[aIdx]!,
-        allBindings[bIdx]!,
-        allBindings[cIdx]!,
-      ])
-    }
-
-    const result = new Set<Binding>()
-
-    // Check pair cycles (mutual recursion between any 2, with no incoming edge from 3rd)
-    if (aRefsB && bRefsA && !cRefsA && !cRefsB) {
-      result.add(allBindings[aIdx]!)
-      result.add(allBindings[bIdx]!)
-    }
-    if (aRefsC && cRefsA && !bRefsA && !bRefsC) {
-      result.add(allBindings[aIdx]!)
-      result.add(allBindings[cIdx]!)
-    }
-    if (bRefsC && cRefsB && !aRefsB && !aRefsC) {
-      result.add(allBindings[bIdx]!)
-      result.add(allBindings[cIdx]!)
-    }
-
-    // Self-referencing
-    if (aRefs?.includes(aIdx)) result.add(allBindings[aIdx]!)
-    if (bRefs?.includes(bIdx)) result.add(allBindings[bIdx]!)
-    if (cRefs?.includes(cIdx)) result.add(allBindings[cIdx]!)
-
-    return result
-  }
-
-  // 4+ candidates: use Tarjan's SCC algorithm to find cycles
+  // Tarjan's SCC algorithm finds cycles. Small candidate sets are not
+  // special-cased: hand-written checks missed cycles such as a<->c, b<->c.
   const indices = new Int32Array(n).fill(-1)
   const lowlink = new Int32Array(n)
   const onStack = new Uint8Array(n)
