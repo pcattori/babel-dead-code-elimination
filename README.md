@@ -1,4 +1,3 @@
-
 # babel-dead-code-elimination
 
 Composable primitives for dead code elimination in Babel

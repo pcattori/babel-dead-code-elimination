@@ -919,7 +919,6 @@ describe("SCC dead code elimination", () => {
   })
 })
 
-
 test("everything is unreferenced, nothing is removed", async () => {
   let source = ts`
    function a() {}

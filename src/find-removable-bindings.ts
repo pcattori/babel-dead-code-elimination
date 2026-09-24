@@ -52,7 +52,9 @@ export default function findRemovableBindings(
         const containerRefs = refs[containerIdx]
         if (!containerRefs) {
           refs[containerIdx] = [i]
-        } else if (!containerRefs.includes(i)) {
+          // References to this target are processed together, so any duplicate
+          // edge is the last one appended to its containing declaration.
+        } else if (containerRefs[containerRefs.length - 1] !== i) {
           containerRefs.push(i)
         }
       } else if (!excluded[i]) {

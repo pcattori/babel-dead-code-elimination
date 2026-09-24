@@ -200,7 +200,6 @@ test("n=3: reverse triangle A←B←C←A -> all removable", () => {
   expect(names.sort()).toEqual(["a", "b", "c"])
 })
 
-
 test("n=4: two separate SCCs -> both cycles removable", () => {
   let source = dedent`
     function a() { return b() }
