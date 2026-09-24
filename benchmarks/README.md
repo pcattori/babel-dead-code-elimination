@@ -70,3 +70,19 @@ arbitrary edits. This avoids rebuilding binding/reference metadata; it adds no c
 | tiny-module          | references |         9.892 (9.674–10.222) |          4.593 (4.447–4.791) |     -53.57% |
 | default-api-control  | references |    890.135 (885.276–892.034) |    887.898 (878.151–905.305) |      -0.25% |
 | schema-40-end-to-end | pipeline   | 5890.935 (5781.365–5995.495) | 5499.375 (5371.797–5573.023) |      -6.65% |
+
+## 03-imports: Stop after import-only removals
+
+Removing an import cannot remove a reference to another local binding. Only
+non-import removals now request another scope crawl/elimination pass. Original
+bare side-effect imports remain intact. This also avoids the allocation work of
+the redundant pass. All-live and bare-import control ranges overlap.
+
+| Workload                   | Phase    |              Before µs (IQR) |               After µs (IQR) | Time change |
+| -------------------------- | -------- | ---------------------------: | ---------------------------: | ----------: |
+| stripped-schema-import     | dce      | 2002.016 (1957.188–2060.594) | 1106.159 (1046.372–1143.813) |     -44.75% |
+| 64-imports-amid-live-code  | dce      | 2304.542 (2264.508–2359.193) | 1448.154 (1332.060–1528.182) |     -37.16% |
+| variable-to-import-cascade | dce      | 1832.591 (1801.826–1890.802) | 1372.182 (1367.656–1503.375) |     -25.12% |
+| all-imports-live-control   | dce      | 1129.044 (1066.055–1152.000) |  1105.281 (946.190–1130.849) |      -2.10% |
+| bare-imports-control       | dce      |       22.714 (19.948–23.781) |       20.406 (19.461–22.073) |     -10.16% |
+| stripped-schema-end-to-end | pipeline | 5820.107 (5725.354–5946.872) | 5207.050 (5142.448–5294.284) |     -10.53% |

@@ -19,7 +19,7 @@ export default function (
   ast: ParseResult<Babel.File>,
   candidates?: Set<NodePath<Babel.Identifier>>,
 ) {
-  let removals: number
+  let needsAnotherPass: boolean
 
   // Bindings that form closed cycles (SCCs) with no external references
   let removableBindings = new Set<Binding>()
@@ -55,7 +55,7 @@ export default function (
   }
 
   do {
-    removals = 0
+    needsAnotherPass = false
 
     traverse(ast, {
       Program(path) {
@@ -63,15 +63,17 @@ export default function (
         removableBindings = findRemovableBindings(path)
       },
       ImportDeclaration(path) {
-        let removalsBefore = removals
+        // Imports cannot keep another local declaration alive.
+        if (path.node.specifiers.length === 0) {
+          return
+        }
         for (let specifier of path.get("specifiers")) {
           let local = specifier.get("local")
           if (shouldBeRemoved(local)) {
             specifier.remove()
-            removals++
           }
         }
-        if (removals > removalsBefore && path.node.specifiers.length === 0) {
+        if (path.node.specifiers.length === 0) {
           path.remove()
         }
       },
@@ -80,7 +82,7 @@ export default function (
         if (id.isIdentifier()) {
           if (shouldBeRemoved(id)) {
             path.remove()
-            removals++
+            needsAnotherPass = true
           }
         } else if (id.isObjectPattern() || id.isArrayPattern()) {
           for (let variable of Pattern.findVariables(id)) {
@@ -90,25 +92,25 @@ export default function (
 
             if (parent.isObjectProperty()) {
               parent.remove()
-              removals++
+              needsAnotherPass = true
               continue
             }
 
             if (parent.isArrayPattern()) {
               parent.node.elements[variable.key as number] = null
-              removals++
+              needsAnotherPass = true
               continue
             }
 
             if (parent.isAssignmentPattern()) {
               if (t.isObjectProperty(parent.parent)) {
                 parent.parentPath?.remove()
-                removals++
+                needsAnotherPass = true
                 continue
               }
               if (t.isArrayPattern(parent.parent)) {
                 parent.parent.elements[parent.key as number] = null
-                removals++
+                needsAnotherPass = true
                 continue
               }
               throw unexpected(parent)
@@ -116,7 +118,7 @@ export default function (
 
             if (parent.isRestElement()) {
               parent.remove()
-              removals++
+              needsAnotherPass = true
               continue
             }
 
@@ -133,7 +135,7 @@ export default function (
         let isEmpty = path.node.properties.length === 0
         if (isWithinDeclarator && !isFunctionParam && isEmpty) {
           Pattern.remove(path)
-          removals++
+          needsAnotherPass = true
         }
       },
       ArrayPattern(path) {
@@ -145,13 +147,13 @@ export default function (
         let isEmpty = path.node.elements.every((e) => e === null)
         if (isWithinDeclarator && !isFunctionParam && isEmpty) {
           Pattern.remove(path)
-          removals++
+          needsAnotherPass = true
         }
       },
       FunctionDeclaration(path) {
         let id = path.get("id")
         if (id.isIdentifier() && shouldBeRemoved(id)) {
-          removals++
+          needsAnotherPass = true
           if (
             t.isAssignmentExpression(path.parentPath.node) ||
             t.isVariableDeclarator(path.parentPath.node)
@@ -163,5 +165,5 @@ export default function (
         }
       },
     })
-  } while (removals > 0)
+  } while (needsAnotherPass)
 }
