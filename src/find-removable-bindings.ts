@@ -1,4 +1,5 @@
-import { type NodePath, type Babel, type Binding } from "./babel-esm"
+import { t, type NodePath, type Babel, type Binding } from "./babel-esm"
+import { isRestFiltered } from "./pattern"
 
 /**
  * Finds bindings forming closed SCCs with no external references.
@@ -42,6 +43,7 @@ export default function findRemovableBindings(
       binding.constantViolations.length > 0 ||
       isLoopIteratorBinding(binding) ||
       !isRemovableDeclaration(binding) ||
+      isRestFilteredBinding(binding) ||
       isKept?.(binding)
     ) {
       excluded[i] = 1
@@ -201,6 +203,16 @@ function isRemovableDeclaration(binding: Binding): boolean {
       return true
   }
   return false
+}
+
+// Elimination keeps object pattern properties that are filtered out of a rest
+// element, even when they are unused.
+function isRestFilteredBinding(binding: Binding): boolean {
+  const declarator = binding.path.node
+  return (
+    t.isVariableDeclarator(declarator) &&
+    isRestFiltered(declarator.id, binding.identifier)
+  )
 }
 
 export function isLoopIteratorBinding(binding: Binding): boolean {

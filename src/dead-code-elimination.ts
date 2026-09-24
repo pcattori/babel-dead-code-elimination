@@ -51,15 +51,6 @@ export default function (
     // Preserve loop iterator bindings (for...of, for...in)
     if (binding && isLoopIteratorBinding(binding)) return false
 
-    // Preserve unused variables in object patterns when rest element is used
-    // For example, in `let { a, ...rest } = ...` even if `a` is unused
-    // it needs to remain in the object pattern so that `a` is filtered out of `rest`
-    const grandParent = ident.parentPath.parentPath
-    if (grandParent?.isObjectPattern()) {
-      if (ident.parentPath.isRestElement()) return true
-      return !t.isRestElement(grandParent.node.properties.at(-1))
-    }
-
     return true
   }
 
@@ -90,6 +81,11 @@ export default function (
         }
       } else if (id.isObjectPattern() || id.isArrayPattern()) {
         for (let variable of Pattern.findVariables(id)) {
+          // Keep unused variables that are filtered out of an object rest: in
+          // `let { a, ...rest } = ...`, removing `a` would add it to `rest`.
+          // This includes defaults and nested patterns, and takes precedence
+          // over removable cycles.
+          if (Pattern.isRestFiltered(id.node, variable.node)) continue
           if (!shouldBeRemoved(variable)) continue
 
           let parent = variable.parentPath
@@ -135,12 +131,15 @@ export default function (
       if (path.node.properties.length !== 0) {
         return
       }
-      let isWithinDeclarator =
-        path.find((p) => p.isVariableDeclarator()) !== null
+      let declarator = path.find((p) => p.isVariableDeclarator())
       let isFunctionParam =
         path.parentPath.isFunction() &&
         path.parentPath.node.params.includes(path.node)
-      if (isWithinDeclarator && !isFunctionParam) {
+      if (
+        t.isVariableDeclarator(declarator?.node) &&
+        !isFunctionParam &&
+        !Pattern.isRestFiltered(declarator.node.id, path.node)
+      ) {
         Pattern.remove(path)
         needsAnotherPass = true
       }
@@ -150,12 +149,15 @@ export default function (
       if (!path.node.elements.every((element) => element === null)) {
         return
       }
-      let isWithinDeclarator =
-        path.find((p) => p.isVariableDeclarator()) !== null
+      let declarator = path.find((p) => p.isVariableDeclarator())
       let isFunctionParam =
         path.parentPath.isFunction() &&
         path.parentPath.node.params.includes(path.node)
-      if (isWithinDeclarator && !isFunctionParam) {
+      if (
+        t.isVariableDeclarator(declarator?.node) &&
+        !isFunctionParam &&
+        !Pattern.isRestFiltered(declarator.node.id, path.node)
+      ) {
         Pattern.remove(path)
         needsAnotherPass = true
       }

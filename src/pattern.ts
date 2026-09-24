@@ -33,6 +33,47 @@ export function findVariables(
   return variables
 }
 
+/**
+ * Whether `target` sits in a property of an object pattern that ends with a
+ * rest element. Removing it would add that property to the rest object.
+ */
+export function isRestFiltered(pattern: Node, target: Node): boolean {
+  return restFiltered(pattern, target, false) === true
+}
+
+function restFiltered(
+  node: Node | null | undefined,
+  target: Node,
+  filtered: boolean,
+): boolean | undefined {
+  if (!node) return undefined
+  if (node === target) return filtered
+  if (t.isObjectPattern(node)) {
+    let hasRest = t.isRestElement(node.properties.at(-1))
+    for (let property of node.properties) {
+      let result = t.isRestElement(property)
+        ? restFiltered(property.argument, target, filtered)
+        : restFiltered(property.value, target, filtered || hasRest)
+      if (result !== undefined) return result
+    }
+    return undefined
+  }
+  if (t.isArrayPattern(node)) {
+    for (let element of node.elements) {
+      let result = restFiltered(element, target, filtered)
+      if (result !== undefined) return result
+    }
+    return undefined
+  }
+  if (t.isAssignmentPattern(node)) {
+    return restFiltered(node.left, target, filtered)
+  }
+  if (t.isRestElement(node)) {
+    return restFiltered(node.argument, target, filtered)
+  }
+  return undefined
+}
+
 export function remove(path: NodePath<t.ObjectPattern | t.ArrayPattern>) {
   let parent = path.parentPath
   if (parent.isVariableDeclarator()) {
