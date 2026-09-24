@@ -172,41 +172,56 @@ export default function findRemovableBindings(
   const sccs: number[][] = []
   const sccId = new Int32Array(n).fill(-1)
   let index = 0
+  // Iterative depth-first search: reference chains can be longer than the
+  // call stack allows. edgeCursor[v] is the next neighbor of v to explore.
+  const callStack: number[] = []
+  const edgeCursor = new Int32Array(n)
 
-  const strongconnect = (v: number): void => {
+  const visit = (v: number): void => {
     indices[v] = lowlink[v] = index++
     stack.push(v)
     onStack[v] = 1
+    callStack.push(v)
+  }
 
-    const neighbors = refs[v]
-    if (neighbors) {
-      for (const w of neighbors) {
+  for (let root = 0; root < n; root++) {
+    if (excluded[root] || indices[root] !== -1) continue
+    visit(root)
+    while (callStack.length > 0) {
+      const v = callStack[callStack.length - 1]!
+      const neighbors = refs[v]
+      const edge = edgeCursor[v]!
+      if (neighbors && edge < neighbors.length) {
+        edgeCursor[v] = edge + 1
+        const w = neighbors[edge]!
         if (excluded[w]) continue
         if (indices[w] === -1) {
-          strongconnect(w)
-          if (lowlink[w]! < lowlink[v]!) lowlink[v] = lowlink[w]!
+          visit(w)
         } else if (onStack[w]) {
           if (indices[w]! < lowlink[v]!) lowlink[v] = indices[w]!
         }
+        continue
+      }
+
+      callStack.pop()
+      const parent = callStack[callStack.length - 1]
+      if (parent !== undefined && lowlink[v]! < lowlink[parent]!) {
+        lowlink[parent] = lowlink[v]!
+      }
+
+      if (lowlink[v] === indices[v]) {
+        const comp: number[] = []
+        let w: number
+        const compId = sccs.length
+        do {
+          w = stack.pop()!
+          onStack[w] = 0
+          sccId[w] = compId
+          comp.push(w)
+        } while (w !== v)
+        sccs.push(comp)
       }
     }
-
-    if (lowlink[v] === indices[v]) {
-      const comp: number[] = []
-      let w: number
-      const compId = sccs.length
-      do {
-        w = stack.pop()!
-        onStack[w] = 0
-        sccId[w] = compId
-        comp.push(w)
-      } while (w !== v)
-      sccs.push(comp)
-    }
-  }
-
-  for (let v = 0; v < n; v++) {
-    if (!excluded[v] && indices[v] === -1) strongconnect(v)
   }
 
   // Mark SCCs with any incoming edge from outside the SCC (among non-excluded bindings)
