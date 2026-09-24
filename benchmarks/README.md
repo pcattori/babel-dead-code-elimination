@@ -86,3 +86,18 @@ the redundant pass. All-live and bare-import control ranges overlap.
 | all-imports-live-control   | dce      | 1129.044 (1066.055–1152.000) |  1105.281 (946.190–1130.849) |      -2.10% |
 | bare-imports-control       | dce      |       22.714 (19.948–23.781) |       20.406 (19.461–22.073) |     -10.16% |
 | stripped-schema-end-to-end | pipeline | 5820.107 (5725.354–5946.872) | 5207.050 (5142.448–5294.284) |     -10.53% |
+
+## 04-checks: Avoid unnecessary destructuring checks
+
+Nonempty patterns skip ancestor searches; object-rest detection inspects the last
+AST property without requesting an array of NodePaths. This removes unnecessary
+work and temporary path-array allocation. All measured ranges overlap, so the
+small median differences do not establish a general speedup.
+
+| Workload                      | Phase    |              Before µs (IQR) |               After µs (IQR) | Time change |
+| ----------------------------- | -------- | ---------------------------: | ---------------------------: | ----------: |
+| live-nonempty-patterns        | dce      | 1852.854 (1746.977–1939.708) | 1780.836 (1704.253–1893.398) |      -3.89% |
+| live-object-rest-exclusions   | dce      |    780.763 (772.453–843.687) |    767.550 (765.289–773.148) |      -1.69% |
+| empty-nested-pattern-cleanup  | dce      |       38.997 (37.268–41.583) |       39.003 (35.188–45.338) |      +0.01% |
+| no-pattern-no-removal-control | dce      |   939.875 (915.318–1002.865) |    946.206 (911.810–979.857) |      +0.67% |
+| live-patterns-end-to-end      | pipeline | 8266.367 (8172.148–8384.055) | 8243.539 (8130.651–8306.510) |      -0.28% |

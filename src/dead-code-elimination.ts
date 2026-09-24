@@ -47,7 +47,7 @@ export default function (
     const grandParent = ident.parentPath.parentPath
     if (grandParent?.isObjectPattern()) {
       if (ident.parentPath.isRestElement()) return true
-      return !grandParent.get("properties").at(-1)?.isRestElement()
+      return !t.isRestElement(grandParent.node.properties.at(-1))
     }
 
     if (hasCandidates) return candidates.has(ident)
@@ -127,25 +127,29 @@ export default function (
         }
       },
       ObjectPattern(path) {
+        if (path.node.properties.length !== 0) {
+          return
+        }
         let isWithinDeclarator =
           path.find((p) => p.isVariableDeclarator()) !== null
         let isFunctionParam =
           path.parentPath.isFunction() &&
           path.parentPath.node.params.includes(path.node)
-        let isEmpty = path.node.properties.length === 0
-        if (isWithinDeclarator && !isFunctionParam && isEmpty) {
+        if (isWithinDeclarator && !isFunctionParam) {
           Pattern.remove(path)
           needsAnotherPass = true
         }
       },
       ArrayPattern(path) {
+        if (!path.node.elements.every((e) => e === null)) {
+          return
+        }
         let isWithinDeclarator =
           path.find((p) => p.isVariableDeclarator()) !== null
         let isFunctionParam =
           path.parentPath.isFunction() &&
           path.parentPath.node.params.includes(path.node)
-        let isEmpty = path.node.elements.every((e) => e === null)
-        if (isWithinDeclarator && !isFunctionParam && isEmpty) {
+        if (isWithinDeclarator && !isFunctionParam) {
           Pattern.remove(path)
           needsAnotherPass = true
         }
