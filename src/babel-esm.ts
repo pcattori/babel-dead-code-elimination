@@ -11,3 +11,4 @@ const require = createRequire(import.meta.url)
 
 import _traverse = require("@babel/traverse")
 export const traverse = _traverse.default
+export const BabelNodePath = _traverse.NodePath

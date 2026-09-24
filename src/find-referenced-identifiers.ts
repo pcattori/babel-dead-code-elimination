@@ -8,6 +8,7 @@ import {
 import type { Visitor } from "@babel/traverse"
 import * as Pattern from "./pattern"
 import { crawlProgram, mustCrawlProgram } from "./scope"
+import { forEachMatchingPath, getProgramPath } from "./walk"
 import findRemovableBindings, {
   getDeclaredBinding,
   isReferenced,
@@ -30,39 +31,51 @@ function addIfReferenced(
   }
 }
 
+const DECLARATION_TYPES = new Set([
+  "ImportDeclaration",
+  "VariableDeclarator",
+  "FunctionDeclaration",
+  "ClassDeclaration",
+])
+
+/** Calls `identifier` for each identifier that a declaration path declares. */
+function forEachDeclaredIdentifier(
+  path: NodePath,
+  identifier: (path: IdentifierPath) => void,
+): void {
+  if (path.isImportDeclaration()) {
+    for (const specifier of path.get("specifiers")) {
+      identifier(specifier.get("local"))
+    }
+  } else if (path.isVariableDeclarator()) {
+    const id = path.get("id")
+    if (id.isIdentifier()) {
+      identifier(id)
+    } else if (id.isObjectPattern() || id.isArrayPattern()) {
+      for (const variable of Pattern.findVariables(id)) {
+        identifier(variable)
+      }
+    }
+  } else if (path.isFunctionDeclaration() || path.isClassDeclaration()) {
+    const id = path.get("id") as NodePath
+    if (id.isIdentifier()) {
+      identifier(id)
+    }
+  }
+}
+
 function declarationVisitor(
   program: (path: NodePath<Babel.Program>) => void,
   identifier: (path: IdentifierPath) => void,
 ): Visitor {
+  const declaration = (path: NodePath) =>
+    forEachDeclaredIdentifier(path, identifier)
   return {
     Program: program,
-    ImportDeclaration(path) {
-      for (const specifier of path.get("specifiers")) {
-        identifier(specifier.get("local"))
-      }
-    },
-    VariableDeclarator(path) {
-      const id = path.get("id")
-      if (id.isIdentifier()) {
-        identifier(id)
-      } else if (id.isObjectPattern() || id.isArrayPattern()) {
-        for (const variable of Pattern.findVariables(id)) {
-          identifier(variable)
-        }
-      }
-    },
-    FunctionDeclaration(path) {
-      const id = path.get("id")
-      if (id.isIdentifier()) {
-        identifier(id)
-      }
-    },
-    ClassDeclaration(path) {
-      const id = path.get("id")
-      if (id.isIdentifier()) {
-        identifier(id)
-      }
-    },
+    ImportDeclaration: declaration,
+    VariableDeclarator: declaration,
+    FunctionDeclaration: declaration,
+    ClassDeclaration: declaration,
   }
 }
 
@@ -71,19 +84,20 @@ export default function (
   options?: ScopeOptions,
 ): Set<IdentifierPath> {
   const referenced = new Set<IdentifierPath>()
-  let removable: Set<Binding>
   const crawl = !options?.scopeIsFresh && mustCrawlProgram(ast)
-  traverse(
-    ast,
-    declarationVisitor(
-      (path) => {
-        if (crawl) {
-          crawlProgram(path)
-        }
-        removable = findRemovableBindings(path)
-      },
-      (ident) => addIfReferenced(ident, removable, referenced),
-    ),
+  const programPath = getProgramPath(ast)
+  if (crawl) {
+    crawlProgram(programPath)
+  }
+  const removable = findRemovableBindings(programPath)
+  // Declarations are found without a second Babel traversal (see walk.ts).
+  forEachMatchingPath(
+    programPath,
+    (node) => DECLARATION_TYPES.has(node.type),
+    (path) =>
+      forEachDeclaredIdentifier(path, (ident) =>
+        addIfReferenced(ident, removable, referenced),
+      ),
   )
   return referenced
 }
