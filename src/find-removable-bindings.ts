@@ -10,12 +10,17 @@ export default function findRemovableBindings(
 
   // Build a graph of bindings for cycle detection (Tarjan's algorithm)
   // if binding `a` is referenced inside binding `b`'s definition, refs[b] contains a
-  // Map each binding's declaration node to its index for fast lookup when tracing refs
-  const pathNodeToIdx = new Map<Babel.Node, number>()
+  // Map each declaration node to the bindings it declares for fast lookup when
+  // tracing refs. A destructuring declarator declares several bindings.
+  const pathNodeToIdx = new Map<Babel.Node, number[]>()
   const refs: (number[] | null)[] = new Array(n)
   for (let i = 0; i < n; i++) {
-    const b = allBindings[i]!
-    if (b.path?.node) pathNodeToIdx.set(b.path.node, i)
+    const node = allBindings[i]!.path?.node
+    if (node) {
+      const indices = pathNodeToIdx.get(node)
+      if (indices) indices.push(i)
+      else pathNodeToIdx.set(node, [i])
+    }
     refs[i] = null
   }
 
@@ -42,20 +47,23 @@ export default function findRemovableBindings(
     for (const refPath of binding.referencePaths) {
       // Walk up the AST to find which binding (if any) contains this reference
       let path: NodePath | null = refPath
-      let containerIdx: number | undefined
+      let containers: number[] | undefined
       while (path) {
-        containerIdx = pathNodeToIdx.get(path.node)
-        if (containerIdx !== undefined) break
+        containers = pathNodeToIdx.get(path.node)
+        if (containers !== undefined) break
         path = path.parentPath
       }
-      if (containerIdx !== undefined) {
-        const containerRefs = refs[containerIdx]
-        if (!containerRefs) {
-          refs[containerIdx] = [i]
-          // References to this target are processed together, so any duplicate
-          // edge is the last one appended to its containing declaration.
-        } else if (containerRefs[containerRefs.length - 1] !== i) {
-          containerRefs.push(i)
+      if (containers !== undefined) {
+        // Every binding of a declarator keeps its initializer alive.
+        for (const containerIdx of containers) {
+          const containerRefs = refs[containerIdx]
+          if (!containerRefs) {
+            refs[containerIdx] = [i]
+            // References to this target are processed together, so any duplicate
+            // edge is the last one appended to its containing declaration.
+          } else if (containerRefs[containerRefs.length - 1] !== i) {
+            containerRefs.push(i)
+          }
         }
       } else if (!excluded[i]) {
         excluded[i] = 1
