@@ -52,7 +52,6 @@ export default function (
       return !t.isRestElement(grandParent.node.properties.at(-1))
     }
 
-    if (hasCandidates) return candidates.has(ident)
     return true
   }
 
@@ -158,14 +157,7 @@ export default function (
       let id = path.get("id")
       if (id.isIdentifier() && shouldBeRemoved(id)) {
         needsAnotherPass = true
-        if (
-          t.isAssignmentExpression(path.parentPath.node) ||
-          t.isVariableDeclarator(path.parentPath.node)
-        ) {
-          path.parentPath.remove()
-        } else {
-          path.remove()
-        }
+        path.remove()
       }
       return
     }

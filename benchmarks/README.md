@@ -146,3 +146,43 @@ the caller discards it, with no global cache.
 | default-api-control                | references |    917.508 (912.599–942.802) |    915.818 (905.378–923.013) |      -0.18% |
 | schema-80-end-to-end               | pipeline   | 9542.250 (9476.971–9666.201) | 8994.841 (8949.544–9094.828) |      -5.74% |
 | discarded-200-end-to-end           | pipeline   | 3928.060 (3917.099–4059.953) | 4057.328 (4028.185–4084.271) |      +3.29% |
+
+## 07-cleanup: Remove redundant declaration checks
+
+Remove a second candidate-membership check already enforced on entry and an
+unreachable FunctionDeclaration parent branch: variable initializers and assignment
+right-hand sides contain expressions, not FunctionDeclarations. This is a code
+simplification, not a demonstrated speedup. Initial medians were slower with
+substantially overlapping ranges. The confirmation and isolated diagnostics below
+are retained rather than selecting the most favorable run. No new allocations.
+
+| Workload                         | Phase    |              Before µs (IQR) |               After µs (IQR) | Time change |
+| -------------------------------- | -------- | ---------------------------: | ---------------------------: | ----------: |
+| candidate-filtered-128-variables | dce      |    543.787 (532.362–566.815) |    570.060 (512.865–584.737) |      +4.83% |
+| candidate-filtered-48-functions  | dce      |    199.401 (191.586–209.409) |    221.125 (194.578–227.216) |     +10.89% |
+| no-removal-control               | dce      | 1034.273 (1008.536–1201.234) |  1021.005 (896.760–1193.393) |      -1.28% |
+| 48-functions-end-to-end          | pipeline | 1518.490 (1291.510–1623.797) | 1642.398 (1478.901–1692.833) |      +8.16% |
+
+Confirmation: 256 warmups and 15 paired batches, otherwise the same primary fixture.
+
+| Workload                         | Phase    |              Before µs (IQR) |               After µs (IQR) | Time change |
+| -------------------------------- | -------- | ---------------------------: | ---------------------------: | ----------: |
+| candidate-filtered-128-variables | dce      |    496.979 (486.513–533.974) |    489.992 (485.018–536.352) |      -1.41% |
+| candidate-filtered-48-functions  | dce      |    189.156 (186.284–200.089) |    193.542 (184.737–215.161) |      +2.32% |
+| no-removal-control               | dce      |  1039.323 (926.958–1178.049) |  1035.018 (935.362–1196.776) |      -0.41% |
+| 48-functions-end-to-end          | pipeline | 1451.648 (1387.125–1650.503) | 1530.333 (1390.651–1688.404) |      +5.42% |
+
+Isolated diagnostics: each deletion separately against the pre-cleanup source,
+256 warmups, 15 paired batches of 128 prepared operations. Both IQRs overlap.
+
+| Workload                         | Phase |           Before µs (IQR) |            After µs (IQR) | Time change |
+| -------------------------------- | ----- | ------------------------: | ------------------------: | ----------: |
+| candidate-filtered-128-variables | dce   | 600.662 (591.384–610.185) | 610.141 (595.975–621.478) |      +1.58% |
+
+| Workload                        | Phase |           Before µs (IQR) |            After µs (IQR) | Time change |
+| ------------------------------- | ----- | ------------------------: | ------------------------: | ----------: |
+| candidate-filtered-48-functions | dce   | 226.058 (219.203–235.103) | 226.108 (223.016–233.229) |      +0.02% |
+
+The primary confirmation can be repeated with `DCE_BENCH_WARMUPS=256 DCE_BENCH_SAMPLES=15`.
+The isolated fixtures require a source variant containing just that deletion;
+prepare it with `--sources BEFORE_DIRECTORY AFTER_DIRECTORY` instead of `--refs`.
