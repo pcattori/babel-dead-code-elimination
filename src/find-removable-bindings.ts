@@ -9,7 +9,14 @@ export default function findRemovableBindings(
   programPath: NodePath<Babel.Program>,
   isKept?: (binding: Binding) => boolean,
 ): Set<Binding> {
-  const allBindings = Object.values(programPath.scope.bindings)
+  // Babel keeps bindings in a dictionary-mode object, where Object.keys with
+  // indexed reads is several times faster than Object.values.
+  const bindingsByName = programPath.scope.bindings
+  const names = Object.keys(bindingsByName)
+  const allBindings = new Array<Binding>(names.length)
+  for (let i = 0; i < names.length; i++) {
+    allBindings[i] = bindingsByName[names[i]!]!
+  }
   const n = allBindings.length
   if (n === 0) return new Set()
 
