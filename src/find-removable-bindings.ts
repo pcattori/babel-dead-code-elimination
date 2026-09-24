@@ -215,6 +215,19 @@ function isRestFilteredBinding(binding: Binding): boolean {
   )
 }
 
+/** Resolves the binding that a declaration's identifier declares. */
+export function getDeclaredBinding(
+  ident: NodePath<Babel.Identifier>,
+): Binding | undefined {
+  // A function declaration's id belongs to the enclosing scope. Its path's
+  // scope is the function's own scope, where a parameter can shadow the name.
+  const scope =
+    ident.key === "id" && ident.parentPath.isFunctionDeclaration()
+      ? ident.parentPath.scope.parent
+      : ident.scope
+  return scope.getBinding(ident.node.name)
+}
+
 export function isLoopIteratorBinding(binding: Binding): boolean {
   if (binding.path.type === "VariableDeclarator") {
     const declPath = binding.path.parentPath

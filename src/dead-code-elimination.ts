@@ -9,6 +9,7 @@ import {
 import * as Pattern from "./pattern"
 import { unexpected } from "./errors"
 import findRemovableBindings, {
+  getDeclaredBinding,
   isLoopIteratorBinding,
 } from "./find-removable-bindings"
 
@@ -38,7 +39,7 @@ export default function (
   const shouldBeRemoved = (ident: NodePath<Babel.Identifier>): boolean => {
     if (hasCandidates && !candidates.has(ident)) return false
 
-    const binding = ident.scope.getBinding(ident.node.name)
+    const binding = getDeclaredBinding(ident)
 
     // Only remove a declaration whose own binding is known. Removing a sole
     // declarator also removes its declaration, and Babel deletes the name

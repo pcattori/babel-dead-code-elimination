@@ -7,7 +7,9 @@ import {
 } from "./babel-esm"
 import type { Visitor } from "@babel/traverse"
 import * as Pattern from "./pattern"
-import findRemovableBindings from "./find-removable-bindings"
+import findRemovableBindings, {
+  getDeclaredBinding,
+} from "./find-removable-bindings"
 
 type IdentifierPath = NodePath<Babel.Identifier>
 type ScopeOptions = {
@@ -20,7 +22,7 @@ function addIfReferenced(
   removable: Set<Binding>,
   referenced: Set<IdentifierPath>,
 ): void {
-  const binding = ident.scope.getBinding(ident.node.name)
+  const binding = getDeclaredBinding(ident)
   if (binding && !removable.has(binding) && binding.referenced) {
     referenced.add(ident)
   }
