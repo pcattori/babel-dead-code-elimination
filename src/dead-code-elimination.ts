@@ -8,6 +8,7 @@ import {
 } from "./babel-esm"
 import * as Pattern from "./pattern"
 import { unexpected } from "./errors"
+import { crawlProgram } from "./scope"
 import findRemovableBindings, {
   getDeclaredBinding,
   isLoopIteratorBinding,
@@ -180,7 +181,7 @@ export default function (
   traverse(ast, {
     Program(path) {
       programPath = path
-      path.scope.crawl()
+      crawlProgram(path)
       removableBindings = findRemovableBindings(path, isKept)
     },
     ImportDeclaration: collect,
@@ -194,7 +195,7 @@ export default function (
   // source order, without traversing unchanged expressions on every iteration.
   while (needsAnotherPass) {
     needsAnotherPass = false
-    programPath.scope.crawl()
+    crawlProgram(programPath)
     removableBindings = findRemovableBindings(programPath, isKept)
     for (const path of paths) {
       if (isAttached(path)) {
