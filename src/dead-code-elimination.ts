@@ -110,7 +110,7 @@ export default function (
     if (path.isVariableDeclarator()) {
       let id = path.get("id")
       if (id.isIdentifier()) {
-        if (shouldBeRemoved(id)) {
+        if (shouldBeRemoved(id) && !callsInFunction(path)) {
           willRemove()
           path.remove()
         }
@@ -122,6 +122,7 @@ export default function (
           // over removable cycles.
           if (Pattern.isRestFiltered(id.node, variable.node)) continue
           if (!shouldBeRemoved(variable)) continue
+          if (callsInFunction(path)) break
 
           let parent = variable.parentPath
 
@@ -169,7 +170,8 @@ export default function (
       let declarator = Pattern.findDeclarator(path)
       if (
         declarator &&
-        !Pattern.isRestFiltered(declarator.node.id, path.node)
+        !Pattern.isRestFiltered(declarator.node.id, path.node) &&
+        !callsInFunction(declarator)
       ) {
         willRemove()
         Pattern.remove(path)
@@ -183,7 +185,8 @@ export default function (
       let declarator = Pattern.findDeclarator(path)
       if (
         declarator &&
-        !Pattern.isRestFiltered(declarator.node.id, path.node)
+        !Pattern.isRestFiltered(declarator.node.id, path.node) &&
+        !callsInFunction(declarator)
       ) {
         willRemove()
         Pattern.remove(path)
@@ -247,4 +250,33 @@ export default function (
     refreshBindings(snapshot!)
     removableBindings = findRemovableBindings(programPath, isKept)
   }
+}
+
+/**
+ * Whether a declarator inside a function initializes its bindings with a call.
+ * Such calls run on every invocation, and some must run in the same order in
+ * every build: removing an unused `const id = useId()` from a component only in
+ * the server build shifts React's hook-based ids. Declarations like these are
+ * kept even when their bindings are unused.
+ */
+function callsInFunction(path: NodePath<Babel.VariableDeclarator>): boolean {
+  let init = path.node.init
+  while (
+    t.isAwaitExpression(init) ||
+    t.isParenthesizedExpression(init) ||
+    t.isTSAsExpression(init) ||
+    t.isTSSatisfiesExpression(init) ||
+    t.isTSNonNullExpression(init) ||
+    t.isTSTypeAssertion(init) ||
+    t.isTypeCastExpression(init)
+  ) {
+    init = t.isAwaitExpression(init) ? init.argument : init.expression
+  }
+  return (
+    (t.isCallExpression(init) ||
+      t.isOptionalCallExpression(init) ||
+      t.isNewExpression(init) ||
+      t.isTaggedTemplateExpression(init)) &&
+    path.getFunctionParent() !== null
+  )
 }

@@ -13,6 +13,8 @@ import { deadCodeElimination, findReferencedIdentifiers } from "./index"
 type Options = {
   /** Remove these exported declarations before DCE, like React Router's removeExports. */
   strip?: string[]
+  /** Replace `DROP(...)` calls with `0` before DCE. */
+  drop?: boolean
   /** Candidates: collected before the transform ("references"), none, or custom. */
   candidates?:
     | "references"
@@ -51,7 +53,7 @@ let stripExports = (ast: Babel.File, names: string[]) => {
 
 let transform = (
   code: string,
-  { strip = [], candidates = "references", typescript }: Options = {},
+  { strip = [], drop, candidates = "references", typescript }: Options = {},
 ): string => {
   let ast = parseModule(code, typescript)
   let referenced =
@@ -61,6 +63,15 @@ let transform = (
         ? undefined
         : candidates(ast)
   if (strip.length > 0) stripExports(ast, strip)
+  if (drop) {
+    traverse(ast, {
+      CallExpression(path) {
+        if (t.isIdentifier(path.node.callee, { name: "DROP" })) {
+          path.replaceWith(t.numericLiteral(0))
+        }
+      },
+    })
+  }
   deadCodeElimination(ast, referenced)
   return generate(ast).code
 }
@@ -467,4 +478,39 @@ describe("definition side effects", () => {
     let output = transform(source, { candidates: "none" })
     expect(output).toBe(unchanged("export const x = 1"))
   })
+})
+
+describe("calls in functions", () => {
+  test("keeps hook calls whose results only stripped code used", () => {
+    let source = ts`
+      export function Field() {
+        const widgetId = useId()
+        const labelId = useId()
+        return [labelId, DROP(widgetId)]
+      }
+    `
+    let output = transform(source, { drop: true })
+    expect(output).toContain("const widgetId = useId()")
+  })
+
+  test.each([
+    ["a call", "const handle = register()", "handle"],
+    ["an awaited call", "const handle = await register()", "handle"],
+    ["a constructor call", "const handle = new Registration()", "handle"],
+    ["a destructured call", "const { entry } = register()", "entry"],
+  ])(
+    "keeps a declaration initialized with %s whose result becomes unused",
+    (_, declaration, name) => {
+      let source = ts`
+      export async function run() {
+        ${declaration}
+        const alias = ${name}
+        return 1
+      }
+    `
+      let output = transform(source, { candidates: "none" })
+      expect(output.replace(/\s+/g, " ")).toContain(declaration)
+      expect(output).not.toContain("alias")
+    },
+  )
 })
