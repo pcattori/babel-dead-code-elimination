@@ -41,6 +41,7 @@ export default function findRemovableBindings(
     if (
       binding.constantViolations.length > 0 ||
       isLoopIteratorBinding(binding) ||
+      !isRemovableDeclaration(binding) ||
       isKept?.(binding)
     ) {
       excluded[i] = 1
@@ -186,6 +187,20 @@ export default function findRemovableBindings(
   }
 
   return removable
+}
+
+// Elimination only removes these declarations. Any other binding (a class, a
+// TypeScript enum, ...) is kept and keeps everything it references alive.
+function isRemovableDeclaration(binding: Binding): boolean {
+  switch (binding.path.type) {
+    case "VariableDeclarator":
+    case "FunctionDeclaration":
+    case "ImportSpecifier":
+    case "ImportDefaultSpecifier":
+    case "ImportNamespaceSpecifier":
+      return true
+  }
+  return false
 }
 
 export function isLoopIteratorBinding(binding: Binding): boolean {
