@@ -1,25 +1,42 @@
-import { type NodePath, type Babel, type Binding } from "./babel-esm"
+import { t, type NodePath, type Babel, type Binding } from "./babel-esm"
+import { isRestFiltered } from "./pattern"
 
-/** Finds bindings forming closed SCCs with no external references. */
+/**
+ * Finds bindings forming closed SCCs with no external references.
+ * @param isKept - Bindings that elimination keeps regardless of references.
+ */
 export default function findRemovableBindings(
   programPath: NodePath<Babel.Program>,
+  isKept?: (binding: Binding) => boolean,
 ): Set<Binding> {
-  const allBindings = Object.values(programPath.scope.bindings)
+  // Babel keeps bindings in a dictionary-mode object, where Object.keys with
+  // indexed reads is several times faster than Object.values.
+  const bindingsByName = programPath.scope.bindings
+  const names = Object.keys(bindingsByName)
+  const allBindings = new Array<Binding>(names.length)
+  for (let i = 0; i < names.length; i++) {
+    allBindings[i] = bindingsByName[names[i]!]!
+  }
   const n = allBindings.length
   if (n === 0) return new Set()
 
-  // Build a graph of bindings for cycle detection (used by shortcuts and Tarjan's algorithm)
+  // Build a graph of bindings for cycle detection (Tarjan's algorithm)
   // if binding `a` is referenced inside binding `b`'s definition, refs[b] contains a
-  // Map each binding's declaration node to its index for fast lookup when tracing refs
-  const pathNodeToIdx = new Map<Babel.Node, number>()
+  // Map each declaration node to the bindings it declares for fast lookup when
+  // tracing refs. A destructuring declarator declares several bindings.
+  const pathNodeToIdx = new Map<Babel.Node, number[]>()
   const refs: (number[] | null)[] = new Array(n)
   for (let i = 0; i < n; i++) {
-    const b = allBindings[i]!
-    if (b.path?.node) pathNodeToIdx.set(b.path.node, i)
+    const node = allBindings[i]!.path?.node
+    if (node) {
+      const indices = pathNodeToIdx.get(node)
+      if (indices) indices.push(i)
+      else pathNodeToIdx.set(node, [i])
+    }
     refs[i] = null
   }
 
-  // Mark bindings as excluded (not removable) if they have external refs, reassignments, or are loop iterators
+  // Mark bindings as excluded (not removable) if they have external refs, reassignments, are loop iterators, or are kept
   const excluded = new Uint8Array(n)
   // excluded bindings whose refs need to be excluded too
   const exclusionQueue: number[] = []
@@ -31,7 +48,10 @@ export default function findRemovableBindings(
 
     if (
       binding.constantViolations.length > 0 ||
-      isLoopIteratorBinding(binding)
+      isLoopIteratorBinding(binding) ||
+      !isRemovableDeclaration(binding) ||
+      isRestFilteredBinding(binding) ||
+      isKept?.(binding)
     ) {
       excluded[i] = 1
       candidateCount--
@@ -40,20 +60,26 @@ export default function findRemovableBindings(
     }
 
     for (const refPath of binding.referencePaths) {
+      if (isTypeOnlyReference(refPath)) continue
       // Walk up the AST to find which binding (if any) contains this reference
       let path: NodePath | null = refPath
-      let containerIdx: number | undefined
+      let containers: number[] | undefined
       while (path) {
-        containerIdx = pathNodeToIdx.get(path.node)
-        if (containerIdx !== undefined) break
+        containers = pathNodeToIdx.get(path.node)
+        if (containers !== undefined) break
         path = path.parentPath
       }
-      if (containerIdx !== undefined) {
-        const containerRefs = refs[containerIdx]
-        if (!containerRefs) {
-          refs[containerIdx] = [i]
-        } else if (!containerRefs.includes(i)) {
-          containerRefs.push(i)
+      if (containers !== undefined) {
+        // Every binding of a declarator keeps its initializer alive.
+        for (const containerIdx of containers) {
+          const containerRefs = refs[containerIdx]
+          if (!containerRefs) {
+            refs[containerIdx] = [i]
+            // References to this target are processed together, so any duplicate
+            // edge is the last one appended to its containing declaration.
+          } else if (containerRefs[containerRefs.length - 1] !== i) {
+            containerRefs.push(i)
+          }
         }
       } else if (!excluded[i]) {
         excluded[i] = 1
@@ -81,88 +107,8 @@ export default function findRemovableBindings(
 
   if (candidateCount === 0) return new Set()
 
-  // Small candidate shortcuts (avoid Tarjan overhead for simple cases)
-  if (candidateCount <= 3) {
-    const candidates: number[] = []
-    for (let i = 0; i < n && candidates.length < candidateCount; i++) {
-      if (!excluded[i]) candidates.push(i)
-    }
-
-    // n=1 shortcut: single candidate is removable only if self-referencing
-    if (candidateCount === 1) {
-      const idx = candidates[0]!
-      return refs[idx]?.includes(idx) ? new Set([allBindings[idx]!]) : new Set()
-    }
-
-    // n=2 shortcut: check for mutual recursion or self-refs
-    if (candidateCount === 2) {
-      const [aIdx, bIdx] = candidates as [number, number]
-
-      // Mutual recursion: both reference each other
-      const aRefs = refs[aIdx]
-      const bRefs = refs[bIdx]
-      const aRefsB = aRefs?.includes(bIdx)
-      const bRefsA = bRefs?.includes(aIdx)
-
-      if (aRefsB && bRefsA) {
-        return new Set([allBindings[aIdx]!, allBindings[bIdx]!])
-      }
-
-      // Otherwise only self-referencing ones are removable
-      const result = new Set<Binding>()
-      if (aRefs?.includes(aIdx)) result.add(allBindings[aIdx]!)
-      if (bRefs?.includes(bIdx)) result.add(allBindings[bIdx]!)
-      return result
-    }
-
-    // n=3 shortcut: check for triangle cycle, pair cycles, or self-refs
-    const [aIdx, bIdx, cIdx] = candidates as [number, number, number]
-
-    const aRefs = refs[aIdx]
-    const bRefs = refs[bIdx]
-    const cRefs = refs[cIdx]
-
-    const aRefsB = aRefs?.includes(bIdx),
-      aRefsC = aRefs?.includes(cIdx)
-    const bRefsA = bRefs?.includes(aIdx),
-      bRefsC = bRefs?.includes(cIdx)
-    const cRefsA = cRefs?.includes(aIdx),
-      cRefsB = cRefs?.includes(bIdx)
-
-    // Triangle: A→B→C→A or A→C→B→A (any cycle involving all 3)
-    if ((aRefsB && bRefsC && cRefsA) || (aRefsC && cRefsB && bRefsA)) {
-      return new Set([
-        allBindings[aIdx]!,
-        allBindings[bIdx]!,
-        allBindings[cIdx]!,
-      ])
-    }
-
-    const result = new Set<Binding>()
-
-    // Check pair cycles (mutual recursion between any 2, with no incoming edge from 3rd)
-    if (aRefsB && bRefsA && !cRefsA && !cRefsB) {
-      result.add(allBindings[aIdx]!)
-      result.add(allBindings[bIdx]!)
-    }
-    if (aRefsC && cRefsA && !bRefsA && !bRefsC) {
-      result.add(allBindings[aIdx]!)
-      result.add(allBindings[cIdx]!)
-    }
-    if (bRefsC && cRefsB && !aRefsB && !aRefsC) {
-      result.add(allBindings[bIdx]!)
-      result.add(allBindings[cIdx]!)
-    }
-
-    // Self-referencing
-    if (aRefs?.includes(aIdx)) result.add(allBindings[aIdx]!)
-    if (bRefs?.includes(bIdx)) result.add(allBindings[bIdx]!)
-    if (cRefs?.includes(cIdx)) result.add(allBindings[cIdx]!)
-
-    return result
-  }
-
-  // 4+ candidates: use Tarjan's SCC algorithm to find cycles
+  // Tarjan's SCC algorithm finds cycles. Small candidate sets are not
+  // special-cased: hand-written checks missed cycles such as a<->c, b<->c.
   const indices = new Int32Array(n).fill(-1)
   const lowlink = new Int32Array(n)
   const onStack = new Uint8Array(n)
@@ -170,41 +116,56 @@ export default function findRemovableBindings(
   const sccs: number[][] = []
   const sccId = new Int32Array(n).fill(-1)
   let index = 0
+  // Iterative depth-first search: reference chains can be longer than the
+  // call stack allows. edgeCursor[v] is the next neighbor of v to explore.
+  const callStack: number[] = []
+  const edgeCursor = new Int32Array(n)
 
-  const strongconnect = (v: number): void => {
+  const visit = (v: number): void => {
     indices[v] = lowlink[v] = index++
     stack.push(v)
     onStack[v] = 1
+    callStack.push(v)
+  }
 
-    const neighbors = refs[v]
-    if (neighbors) {
-      for (const w of neighbors) {
+  for (let root = 0; root < n; root++) {
+    if (excluded[root] || indices[root] !== -1) continue
+    visit(root)
+    while (callStack.length > 0) {
+      const v = callStack[callStack.length - 1]!
+      const neighbors = refs[v]
+      const edge = edgeCursor[v]!
+      if (neighbors && edge < neighbors.length) {
+        edgeCursor[v] = edge + 1
+        const w = neighbors[edge]!
         if (excluded[w]) continue
         if (indices[w] === -1) {
-          strongconnect(w)
-          if (lowlink[w]! < lowlink[v]!) lowlink[v] = lowlink[w]!
+          visit(w)
         } else if (onStack[w]) {
           if (indices[w]! < lowlink[v]!) lowlink[v] = indices[w]!
         }
+        continue
+      }
+
+      callStack.pop()
+      const parent = callStack[callStack.length - 1]
+      if (parent !== undefined && lowlink[v]! < lowlink[parent]!) {
+        lowlink[parent] = lowlink[v]!
+      }
+
+      if (lowlink[v] === indices[v]) {
+        const comp: number[] = []
+        let w: number
+        const compId = sccs.length
+        do {
+          w = stack.pop()!
+          onStack[w] = 0
+          sccId[w] = compId
+          comp.push(w)
+        } while (w !== v)
+        sccs.push(comp)
       }
     }
-
-    if (lowlink[v] === indices[v]) {
-      const comp: number[] = []
-      let w: number
-      const compId = sccs.length
-      do {
-        w = stack.pop()!
-        onStack[w] = 0
-        sccId[w] = compId
-        comp.push(w)
-      } while (w !== v)
-      sccs.push(comp)
-    }
-  }
-
-  for (let v = 0; v < n; v++) {
-    if (!excluded[v] && indices[v] === -1) strongconnect(v)
   }
 
   // Mark SCCs with any incoming edge from outside the SCC (among non-excluded bindings)
@@ -226,21 +187,121 @@ export default function findRemovableBindings(
   const removable = new Set<Binding>()
 
   for (let compId = 0; compId < sccs.length; compId++) {
+    // Removable only if no binding outside the SCC references it. The
+    // referencing binding may be one that elimination keeps.
+    if (hasIncoming[compId]) continue
     const comp = sccs[compId]!
-    // SCC with one binding: only removable if it references itself (e.g. recursive fn)
-    if (comp.length === 1) {
-      const idx = comp[0]!
-      if (refs[idx]?.includes(idx)) removable.add(allBindings[idx]!)
-      continue
-    }
-
-    // SCC with multiple bindings: removable if no binding outside the SCC references it
-    if (!hasIncoming[compId]) {
-      for (const idx of comp) removable.add(allBindings[idx]!)
-    }
+    // SCC with one binding: only a cycle if it references itself (e.g. recursive fn)
+    if (comp.length === 1 && !refs[comp[0]!]?.includes(comp[0]!)) continue
+    for (const idx of comp) removable.add(allBindings[idx]!)
   }
 
   return removable
+}
+
+// Elimination only removes these declarations. Any other binding (such as a
+// TypeScript enum) is kept and keeps everything it references alive.
+function isRemovableDeclaration(binding: Binding): boolean {
+  switch (binding.path.type) {
+    case "ClassDeclaration":
+      return !hasDefinitionSideEffects(
+        binding.path as NodePath<Babel.ClassDeclaration>,
+      )
+    case "VariableDeclarator":
+    case "FunctionDeclaration":
+    case "ImportSpecifier":
+    case "ImportDefaultSpecifier":
+    case "ImportNamespaceSpecifier":
+      return true
+  }
+  return false
+}
+
+// Elimination keeps object pattern properties that are filtered out of a rest
+// element, even when they are unused.
+function isRestFilteredBinding(binding: Binding): boolean {
+  const declarator = binding.path.node
+  return (
+    t.isVariableDeclarator(declarator) &&
+    isRestFiltered(declarator.id, binding.identifier)
+  )
+}
+
+/**
+ * Babel counts the name of a same-named TypeScript type alias, interface or
+ * overload signature as a reference to a value binding. These disappear with
+ * the types and never read the value.
+ */
+function isTypeOnlyReference(path: NodePath): boolean {
+  return (
+    path.key === "id" &&
+    (path.parentPath?.isTSTypeAliasDeclaration() ||
+      path.parentPath?.isTSInterfaceDeclaration() ||
+      path.parentPath?.isTSDeclareFunction()) === true
+  )
+}
+
+/** Whether code other than TypeScript declarations references the binding. */
+export function isReferenced(binding: Binding): boolean {
+  return (
+    binding.referenced &&
+    binding.referencePaths.some((path) => !isTypeOnlyReference(path))
+  )
+}
+
+/**
+ * Whether defining the class runs code whose effects removal would drop:
+ * decorators (which commonly register the class), static blocks, impure
+ * static initializers or computed keys, or an `extends` clause other than a
+ * (dotted) name.
+ */
+export function hasDefinitionSideEffects(
+  path: NodePath<Babel.ClassDeclaration>,
+): boolean {
+  const { node, scope } = path
+  if (node.decorators?.length) return true
+  if (node.superClass && !isName(node.superClass)) return true
+  for (const member of node.body.body) {
+    if (t.isStaticBlock(member)) return true
+    if ("decorators" in member && member.decorators?.length) return true
+    if ("computed" in member && member.computed && !scope.isPure(member.key)) {
+      return true
+    }
+    if (
+      (t.isClassProperty(member) ||
+        t.isClassPrivateProperty(member) ||
+        t.isClassAccessorProperty(member)) &&
+      member.static &&
+      member.value &&
+      !scope.isPure(member.value)
+    ) {
+      return true
+    }
+    if (
+      (t.isClassMethod(member) || t.isTSDeclareMethod(member)) &&
+      member.params.some((param) => param.decorators?.length)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+const isName = (node: Babel.Node): boolean =>
+  t.isIdentifier(node) ||
+  (t.isMemberExpression(node) && !node.computed && isName(node.object))
+
+/** Resolves the binding that a declaration's identifier declares. */
+export function getDeclaredBinding(
+  ident: NodePath<Babel.Identifier>,
+): Binding | undefined {
+  // A function declaration's id belongs to the enclosing scope. Its path's
+  // scope is the function's own scope, where a parameter can shadow the name.
+  const scope =
+    ident.key === "id" && ident.parentPath.isFunctionDeclaration()
+      ? ident.parentPath.scope.parent
+      : ident.scope
+  return scope.getBinding(ident.node.name)
 }
 
 export function isLoopIteratorBinding(binding: Binding): boolean {

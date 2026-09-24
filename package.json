@@ -28,6 +28,8 @@
     "build": "tsdown",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bench": "vitest bench --run",
+    "bench:baseline": "vitest bench --run --outputJson benchmarks/baseline.json && node benchmarks/relative-paths.mjs benchmarks/baseline.json",
     "changeset": "changeset"
   },
   "packageManager": "pnpm@10.2.1",

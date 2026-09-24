@@ -1,0 +1,262 @@
+import * as React from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Form, Link, NavLink, isRouteErrorResponse, useActionData, useFetcher, useLoaderData, useNavigation, useRouteError, useSearchParams } from "react-router";
+import type { Route } from "./+types/settings.profile";
+import { Button } from "~/components/ui/button";
+import { Card, CardContent, CardFooter, CardHeader } from "~/components/ui/card";
+import { Badge } from "~/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip";
+import { Spinner } from "~/components/spinner";
+import { format, formatDistanceToNow } from "date-fns";
+import { cn } from "~/utils/cn";
+import "~/styles/settings.profile.css";
+export const STATUS_LABELS: Record<string, string> = {
+  active: "Active",
+  paused: "Paused",
+  archived: "Archived",
+  failed: "Failed"
+};
+type Filters = {
+  q: string;
+  status: string | null;
+  page: number;
+  pageSize: number;
+  sort: "created" | "updated" | "name";
+  direction: "asc" | "desc";
+};
+interface SerializedItem {
+  id: string;
+  name: string;
+  status: keyof typeof STATUS_LABELS;
+  createdAt: string;
+  updatedAt: string;
+  owner: {
+    id: string;
+    name: string;
+    avatarUrl: string | null;
+  };
+  tags: string[];
+}
+export function meta({
+  data: loaderData
+}: Route.MetaArgs) {
+  const title = loaderData ? `${loaderData.project.name} · Projects` : "Project not found";
+  return [{
+    title
+  }, {
+    name: "description",
+    content: "Project overview"
+  }];
+}
+export function shouldRevalidate({
+  formMethod,
+  defaultShouldRevalidate
+}: {
+  formMethod?: string;
+  defaultShouldRevalidate: boolean;
+}) {
+  if (formMethod === "GET") return false;
+  return defaultShouldRevalidate;
+}
+function useDebounced<T>(value: T, delay = 250): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const handle = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(handle);
+  }, [value, delay]);
+  return debounced;
+}
+function StatusBadge({
+  status
+}: {
+  status: string;
+}) {
+  const variant = status === "failed" ? "destructive" : status === "paused" ? "secondary" : "default";
+  return <Badge variant={variant}>{STATUS_LABELS[status] ?? status}</Badge>;
+}
+function RelativeTime({
+  iso
+}: {
+  iso: string;
+}) {
+  const date = useMemo(() => new Date(iso), [iso]);
+  return <Tooltip>
+      <TooltipTrigger asChild>
+        <time dateTime={iso}>{formatDistanceToNow(date, {
+          addSuffix: true
+        })}</time>
+      </TooltipTrigger>
+      <TooltipContent>{format(date, "PPpp")}</TooltipContent>
+    </Tooltip>;
+}
+function EmptyState({
+  title,
+  children
+}: {
+  title: string;
+  children?: React.ReactNode;
+}) {
+  return <div className="flex flex-col items-center gap-2 py-12 text-center text-muted-foreground">
+      <h3 className="text-lg font-medium">{title}</h3>
+      {children}
+    </div>;
+}
+function FilterBar({
+  filters
+}: {
+  filters: Filters;
+}) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [query, setQuery] = useState(filters.q);
+  const debouncedQuery = useDebounced(query);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    const next = new URLSearchParams(searchParams);
+    if (debouncedQuery) next.set("q", debouncedQuery);else next.delete("q");
+    next.delete("page");
+    setSearchParams(next, {
+      replace: true
+    });
+  }, [debouncedQuery]);
+  return <div className="flex items-center gap-2">
+      <input className="input" type="search" value={query} placeholder="Search…" onChange={event => setQuery(event.currentTarget.value)} />
+      {Object.entries(STATUS_LABELS).map(([value, label]) => <NavLink key={value} to={`?status=${value}`} className={({
+      isActive
+    }) => cn("chip", isActive && "chip-active")}>
+          {label}
+        </NavLink>)}
+    </div>;
+}
+function ItemRow({
+  item,
+  onSelect
+}: {
+  item: SerializedItem;
+  onSelect: (id: string) => void;
+}) {
+  const fetcher = useFetcher();
+  const busy = fetcher.state !== "idle";
+  const {
+    id,
+    name,
+    status,
+    updatedAt,
+    owner,
+    tags
+  } = item;
+  return <tr className={cn(busy && "opacity-50")} onClick={() => onSelect(id)}>
+      <td>
+        <Link to={`./${id}`} prefetch="intent">
+          {name}
+        </Link>
+      </td>
+      <td>
+        <StatusBadge status={status} />
+      </td>
+      <td>{owner.name}</td>
+      <td>{tags.join(", ")}</td>
+      <td>
+        <RelativeTime iso={updatedAt} />
+      </td>
+      <td>
+        <fetcher.Form method="post">
+          <input type="hidden" name="intent" value="toggle" />
+          <input type="hidden" name="id" value={id} />
+          <Button size="sm" variant="ghost" disabled={busy}>
+            {busy ? <Spinner /> : "Toggle"}
+          </Button>
+        </fetcher.Form>
+      </td>
+    </tr>;
+}
+function ActivitySection({
+  section,
+  onSelect
+}: {
+  section: {
+    items: SerializedItem[];
+    total: number;
+    stats: Record<string, number>;
+    pages: number;
+  };
+  onSelect: (id: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const {
+    items,
+    total,
+    stats,
+    pages
+  } = section;
+  const sorted = useMemo(() => [...items].sort((a, b) => a.name.localeCompare(b.name)), [items]);
+  const summary = Object.entries(stats).map(([status, count]) => `${STATUS_LABELS[status] ?? status}: ${count}`).join(" · ");
+  if (items.length === 0) {
+    return <EmptyState title="No activity yet" />;
+  }
+  return <Card>
+      <CardHeader className="flex justify-between">
+        <h2 className="text-base font-semibold">Activity ({total})</h2>
+        <Button variant="link" onClick={() => setExpanded(value => !value)}>
+          {expanded ? "Collapse" : "Expand"}
+        </Button>
+      </CardHeader>
+      {expanded ? <CardContent>
+          <table className="w-full text-sm">
+            <tbody>
+              {sorted.map(item => <ItemRow key={item.id} item={item} onSelect={onSelect} />)}
+            </tbody>
+          </table>
+        </CardContent> : null}
+      <CardFooter className="text-xs text-muted-foreground">
+        {summary} · {pages} page(s)
+      </CardFooter>
+    </Card>;
+}
+export default function ProjectRoute() {
+  const {
+    project,
+    filters,
+    sections
+  } = useLoaderData<typeof loader>();
+  const actionData = useActionData<typeof action>();
+  const navigation = useNavigation();
+  const [selected, setSelected] = useState<string | null>(null);
+  const submitting = navigation.state === "submitting";
+  const errors = actionData && "errors" in actionData ? actionData.errors : null;
+  const onSelect = useCallback((id: string) => setSelected(current => current === id ? null : id), []);
+  return <main className="container space-y-6 py-8">
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">{project.name}</h1>
+          <p className="text-sm text-muted-foreground">
+            Owned by {project.owner.name} · updated <RelativeTime iso={project.updatedAt} />
+          </p>
+        </div>
+        <StatusBadge status={project.status} />
+      </header>
+      <FilterBar filters={filters} />
+      <Form method="post" className="grid gap-2">
+        <input type="hidden" name="intent" value="update" />
+        <input name="name" defaultValue={project.name} aria-invalid={Boolean(errors?.name)} />
+        {errors?.name ? <p className="text-destructive">{errors.name[0]}</p> : null}
+        <Button type="submit" disabled={submitting}>
+          {submitting ? "Saving…" : "Save"}
+        </Button>
+      </Form>
+      <ActivitySection section={sections.activity} onSelect={onSelect} />
+      {selected ? <p className="text-xs">Selected: {selected}</p> : null}
+    </main>;
+}
+export function ErrorBoundary() {
+  const error = useRouteError();
+  if (isRouteErrorResponse(error)) {
+    return <EmptyState title={`${error.status} ${error.statusText}`}>
+        <p>{typeof error.data === "string" ? error.data : "Something went wrong."}</p>
+      </EmptyState>;
+  }
+  return <EmptyState title="Unexpected error" />;
+}

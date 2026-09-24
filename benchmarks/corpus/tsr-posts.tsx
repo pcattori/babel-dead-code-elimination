@@ -1,0 +1,417 @@
+import * as React from "react";
+import { createFileRoute, Link, notFound, useRouter, redirect } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
+import { getWebRequest, setResponseStatus, setHeader } from "@tanstack/react-start/server";
+import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { z } from "zod";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { db } from "~/server/db";
+import * as schema from "~/server/schema";
+import { auth } from "~/server/auth";
+import { cache } from "~/server/cache";
+import { track } from "~/server/analytics";
+import { env } from "~/server/env";
+import { Button } from "~/components/ui/button";
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "~/components/ui/dialog";
+import { DataTable, type ColumnDef } from "~/components/data-table";
+import { useToast } from "~/hooks/use-toast";
+import { formatCurrency, formatDate } from "~/lib/format";
+
+const { ADMIN_EMAILS = "", FEATURE_FLAGS } = env;
+const adminEmails = new Set(ADMIN_EMAILS.split(",").filter(Boolean));
+const flags = JSON.parse(FEATURE_FLAGS ?? "{}") as Record<string, boolean>;
+
+async function requireSession() {
+  const request = getWebRequest();
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session) {
+    setResponseStatus(401);
+    throw redirect({ to: "/login" });
+  }
+  return session;
+}
+
+async function requireAdmin() {
+  const session = await requireSession();
+  const { user } = session;
+  if (!adminEmails.has(user.email) && !flags.openAdmin) {
+    setResponseStatus(403);
+    throw new Error("Forbidden");
+  }
+  return session;
+}
+
+function cached<T>(key: string, ttl: number, load: () => Promise<T>): Promise<T> {
+  return cache.wrap(key, load, { ttl });
+}
+
+const Pagination = z.object({
+  page: z.number().int().min(1).default(1),
+  pageSize: z.number().int().min(1).max(200).default(50),
+  search: z.string().optional(),
+});
+
+// --- post -------------------------------------------------------------
+type PostRow = typeof schema.posts.$inferSelect;
+
+function serializePost(row: PostRow) {
+  const { id, createdAt, updatedAt, ...rest } = row as any;
+  return { id: String(id), createdAt: createdAt.toISOString(), updatedAt: updatedAt?.toISOString() ?? null, ...rest };
+}
+
+async function queryPosts({ page, pageSize, search }: z.infer<typeof Pagination>) {
+  const where = search ? sql`${schema.posts.name} ilike ${"%" + search + "%"}` : undefined;
+  const [rows, [{ count }]] = await Promise.all([
+    db.select().from(schema.posts).where(where).orderBy(desc(schema.posts.createdAt)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)` }).from(schema.posts).where(where),
+  ]);
+  return { rows: rows.map(serializePost), count, page, pageSize };
+}
+
+export const listPosts = createServerFn({ method: "GET" })
+  .validator((input: unknown) => Pagination.parse(input))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    setHeader("Cache-Control", "private, max-age=5");
+    return cached(`posts:${data.page}:${data.pageSize}:${data.search ?? ""}`, 5, () => queryPosts(data));
+  });
+
+export const deletePost = createServerFn({ method: "POST" })
+  .validator(z.object({ ids: z.array(z.string()).min(1) }))
+  .handler(async ({ data: { ids } }) => {
+    const { user } = await requireAdmin();
+    const removed = await db.delete(schema.posts).where(inArray(schema.posts.id, ids)).returning();
+    await track(user.id, "post.delete", { count: removed.length });
+    await cache.invalidate("posts:");
+    return { removed: removed.length };
+  });
+
+export const postsQuery = (params: z.input<typeof Pagination>) =>
+  queryOptions({
+    queryKey: ["posts", params],
+    queryFn: () => listPosts({ data: params }),
+  });
+
+const postColumns: ColumnDef<Awaited<ReturnType<typeof queryPosts>>["rows"][number]>[] = [
+  { accessorKey: "id", header: "ID" },
+  { accessorKey: "name", header: "Name" },
+  { accessorKey: "createdAt", header: "Created", cell: ({ getValue }) => formatDate(getValue<string>()) },
+  {
+    id: "actions",
+    cell: ({ row }) => <DeletePostButton id={row.original.id} />,
+  },
+];
+
+function DeletePostButton({ id }: { id: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deletePost({ data: { ids: [id] } }),
+    onSuccess: ({ removed }) => {
+      toast({ title: `Removed ${removed} post(s)` });
+      return queryClient.invalidateQueries({ queryKey: ["posts"] });
+    },
+  });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete post?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PostPanel({ search }: { search?: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data } = useSuspenseQuery(postsQuery({ page, pageSize: 50, search }));
+  const { rows, count, pageSize } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Posts ({count})</h2>
+      <DataTable columns={postColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// --- comment -------------------------------------------------------------
+type CommentRow = typeof schema.comments.$inferSelect;
+
+function serializeComment(row: CommentRow) {
+  const { id, createdAt, updatedAt, ...rest } = row as any;
+  return { id: String(id), createdAt: createdAt.toISOString(), updatedAt: updatedAt?.toISOString() ?? null, ...rest };
+}
+
+async function queryComments({ page, pageSize, search }: z.infer<typeof Pagination>) {
+  const where = search ? sql`${schema.comments.name} ilike ${"%" + search + "%"}` : undefined;
+  const [rows, [{ count }]] = await Promise.all([
+    db.select().from(schema.comments).where(where).orderBy(desc(schema.comments.createdAt)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)` }).from(schema.comments).where(where),
+  ]);
+  return { rows: rows.map(serializeComment), count, page, pageSize };
+}
+
+export const listComments = createServerFn({ method: "GET" })
+  .validator((input: unknown) => Pagination.parse(input))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    setHeader("Cache-Control", "private, max-age=5");
+    return cached(`comments:${data.page}:${data.pageSize}:${data.search ?? ""}`, 5, () => queryComments(data));
+  });
+
+export const deleteComment = createServerFn({ method: "POST" })
+  .validator(z.object({ ids: z.array(z.string()).min(1) }))
+  .handler(async ({ data: { ids } }) => {
+    const { user } = await requireAdmin();
+    const removed = await db.delete(schema.comments).where(inArray(schema.comments.id, ids)).returning();
+    await track(user.id, "comment.delete", { count: removed.length });
+    await cache.invalidate("comments:");
+    return { removed: removed.length };
+  });
+
+export const commentsQuery = (params: z.input<typeof Pagination>) =>
+  queryOptions({
+    queryKey: ["comments", params],
+    queryFn: () => listComments({ data: params }),
+  });
+
+const commentColumns: ColumnDef<Awaited<ReturnType<typeof queryComments>>["rows"][number]>[] = [
+  { accessorKey: "id", header: "ID" },
+  { accessorKey: "name", header: "Name" },
+  { accessorKey: "createdAt", header: "Created", cell: ({ getValue }) => formatDate(getValue<string>()) },
+  {
+    id: "actions",
+    cell: ({ row }) => <DeleteCommentButton id={row.original.id} />,
+  },
+];
+
+function DeleteCommentButton({ id }: { id: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteComment({ data: { ids: [id] } }),
+    onSuccess: ({ removed }) => {
+      toast({ title: `Removed ${removed} comment(s)` });
+      return queryClient.invalidateQueries({ queryKey: ["comments"] });
+    },
+  });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete comment?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CommentPanel({ search }: { search?: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data } = useSuspenseQuery(commentsQuery({ page, pageSize: 50, search }));
+  const { rows, count, pageSize } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Comments ({count})</h2>
+      <DataTable columns={commentColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// --- user -------------------------------------------------------------
+type UserRow = typeof schema.users.$inferSelect;
+
+function serializeUser(row: UserRow) {
+  const { id, createdAt, updatedAt, ...rest } = row as any;
+  return { id: String(id), createdAt: createdAt.toISOString(), updatedAt: updatedAt?.toISOString() ?? null, ...rest };
+}
+
+async function queryUsers({ page, pageSize, search }: z.infer<typeof Pagination>) {
+  const where = search ? sql`${schema.users.name} ilike ${"%" + search + "%"}` : undefined;
+  const [rows, [{ count }]] = await Promise.all([
+    db.select().from(schema.users).where(where).orderBy(desc(schema.users.createdAt)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)` }).from(schema.users).where(where),
+  ]);
+  return { rows: rows.map(serializeUser), count, page, pageSize };
+}
+
+export const listUsers = createServerFn({ method: "GET" })
+  .validator((input: unknown) => Pagination.parse(input))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    setHeader("Cache-Control", "private, max-age=5");
+    return cached(`users:${data.page}:${data.pageSize}:${data.search ?? ""}`, 5, () => queryUsers(data));
+  });
+
+export const deleteUser = createServerFn({ method: "POST" })
+  .validator(z.object({ ids: z.array(z.string()).min(1) }))
+  .handler(async ({ data: { ids } }) => {
+    const { user } = await requireAdmin();
+    const removed = await db.delete(schema.users).where(inArray(schema.users.id, ids)).returning();
+    await track(user.id, "user.delete", { count: removed.length });
+    await cache.invalidate("users:");
+    return { removed: removed.length };
+  });
+
+export const usersQuery = (params: z.input<typeof Pagination>) =>
+  queryOptions({
+    queryKey: ["users", params],
+    queryFn: () => listUsers({ data: params }),
+  });
+
+const userColumns: ColumnDef<Awaited<ReturnType<typeof queryUsers>>["rows"][number]>[] = [
+  { accessorKey: "id", header: "ID" },
+  { accessorKey: "name", header: "Name" },
+  { accessorKey: "createdAt", header: "Created", cell: ({ getValue }) => formatDate(getValue<string>()) },
+  {
+    id: "actions",
+    cell: ({ row }) => <DeleteUserButton id={row.original.id} />,
+  },
+];
+
+function DeleteUserButton({ id }: { id: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteUser({ data: { ids: [id] } }),
+    onSuccess: ({ removed }) => {
+      toast({ title: `Removed ${removed} user(s)` });
+      return queryClient.invalidateQueries({ queryKey: ["users"] });
+    },
+  });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete user?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function UserPanel({ search }: { search?: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data } = useSuspenseQuery(usersQuery({ page, pageSize: 50, search }));
+  const { rows, count, pageSize } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Users ({count})</h2>
+      <DataTable columns={userColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+export const getDashboardStats = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin();
+  const rows = await db
+    .select({ day: sql<string>`date_trunc('day', created_at)`, revenue: sql<number>`sum(amount)` })
+    .from(schema.invoices)
+    .where(and(eq(schema.invoices.status, "paid")))
+    .groupBy(sql`1`);
+  return rows.map(({ day, revenue }) => ({ day, revenue: Number(revenue) }));
+});
+
+function RevenueChart() {
+  const { data } = useSuspenseQuery(queryOptions({ queryKey: ["stats"], queryFn: () => getDashboardStats() }));
+  const max = Math.max(1, ...data.map(({ revenue }) => revenue));
+  return (
+    <ol className="flex h-32 items-end gap-1">
+      {data.map(({ day, revenue }) => (
+        <li key={day} title={`${formatDate(day)}: ${formatCurrency(revenue)}`} style={{ height: `${(revenue / max) * 100}%` }} className="w-2 bg-primary" />
+      ))}
+    </ol>
+  );
+}
+
+export const Route = createFileRoute("/admin/posts")({
+  validateSearch: (search: Record<string, unknown>) => ({ q: typeof search.q === "string" ? search.q : undefined }),
+  loaderDeps: ({ search: { q } }) => ({ q }),
+  loader: async ({ context: { queryClient }, deps: { q } }) => {
+    await Promise.all([
+      queryClient.ensureQueryData(postsQuery({ page: 1, pageSize: 50, search: q })),
+      queryClient.ensureQueryData(commentsQuery({ page: 1, pageSize: 50, search: q })),
+      queryClient.ensureQueryData(usersQuery({ page: 1, pageSize: 50, search: q })),
+    ]);
+  },
+  component: AdminComponent,
+  pendingComponent: () => <p>Loading…</p>,
+  errorComponent: AdminError,
+});
+
+function AdminError({ error }: { error: Error }) {
+  const router = useRouter();
+  return (
+    <div role="alert">
+      <p>{error.message}</p>
+      <Button onClick={() => router.invalidate()}>Retry</Button>
+    </div>
+  );
+}
+
+function AdminComponent() {
+  const { q } = Route.useSearch();
+  return (
+    <div className="grid gap-8 p-6">
+      <nav className="flex gap-4">
+        <Link to="/">Home</Link>
+        <Link to="/admin/posts" search={{ q: undefined }}>
+          Reset
+        </Link>
+      </nav>
+      <RevenueChart />
+      <PostPanel search={q} />
+      <CommentPanel search={q} />
+      <UserPanel search={q} />
+    </div>
+  );
+}

@@ -1,0 +1,801 @@
+export const answer = 0;
+export function ordinary0(value) {
+  const data = {
+    value: value.trim(),
+    count: 0
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary1(value) {
+  const data = {
+    value: value.trim(),
+    count: 1
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary2(value) {
+  const data = {
+    value: value.trim(),
+    count: 2
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary3(value) {
+  const data = {
+    value: value.trim(),
+    count: 3
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary4(value) {
+  const data = {
+    value: value.trim(),
+    count: 4
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary5(value) {
+  const data = {
+    value: value.trim(),
+    count: 5
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary6(value) {
+  const data = {
+    value: value.trim(),
+    count: 6
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary7(value) {
+  const data = {
+    value: value.trim(),
+    count: 7
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary8(value) {
+  const data = {
+    value: value.trim(),
+    count: 8
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary9(value) {
+  const data = {
+    value: value.trim(),
+    count: 9
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary10(value) {
+  const data = {
+    value: value.trim(),
+    count: 10
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary11(value) {
+  const data = {
+    value: value.trim(),
+    count: 11
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary12(value) {
+  const data = {
+    value: value.trim(),
+    count: 12
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary13(value) {
+  const data = {
+    value: value.trim(),
+    count: 13
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary14(value) {
+  const data = {
+    value: value.trim(),
+    count: 14
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary15(value) {
+  const data = {
+    value: value.trim(),
+    count: 15
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary16(value) {
+  const data = {
+    value: value.trim(),
+    count: 16
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary17(value) {
+  const data = {
+    value: value.trim(),
+    count: 17
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary18(value) {
+  const data = {
+    value: value.trim(),
+    count: 18
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary19(value) {
+  const data = {
+    value: value.trim(),
+    count: 19
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary20(value) {
+  const data = {
+    value: value.trim(),
+    count: 20
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary21(value) {
+  const data = {
+    value: value.trim(),
+    count: 21
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary22(value) {
+  const data = {
+    value: value.trim(),
+    count: 22
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary23(value) {
+  const data = {
+    value: value.trim(),
+    count: 23
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary24(value) {
+  const data = {
+    value: value.trim(),
+    count: 24
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary25(value) {
+  const data = {
+    value: value.trim(),
+    count: 25
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary26(value) {
+  const data = {
+    value: value.trim(),
+    count: 26
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary27(value) {
+  const data = {
+    value: value.trim(),
+    count: 27
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary28(value) {
+  const data = {
+    value: value.trim(),
+    count: 28
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary29(value) {
+  const data = {
+    value: value.trim(),
+    count: 29
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary30(value) {
+  const data = {
+    value: value.trim(),
+    count: 30
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary31(value) {
+  const data = {
+    value: value.trim(),
+    count: 31
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary32(value) {
+  const data = {
+    value: value.trim(),
+    count: 32
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary33(value) {
+  const data = {
+    value: value.trim(),
+    count: 33
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary34(value) {
+  const data = {
+    value: value.trim(),
+    count: 34
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary35(value) {
+  const data = {
+    value: value.trim(),
+    count: 35
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary36(value) {
+  const data = {
+    value: value.trim(),
+    count: 36
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary37(value) {
+  const data = {
+    value: value.trim(),
+    count: 37
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary38(value) {
+  const data = {
+    value: value.trim(),
+    count: 38
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary39(value) {
+  const data = {
+    value: value.trim(),
+    count: 39
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary40(value) {
+  const data = {
+    value: value.trim(),
+    count: 40
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary41(value) {
+  const data = {
+    value: value.trim(),
+    count: 41
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary42(value) {
+  const data = {
+    value: value.trim(),
+    count: 42
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary43(value) {
+  const data = {
+    value: value.trim(),
+    count: 43
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary44(value) {
+  const data = {
+    value: value.trim(),
+    count: 44
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary45(value) {
+  const data = {
+    value: value.trim(),
+    count: 45
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary46(value) {
+  const data = {
+    value: value.trim(),
+    count: 46
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary47(value) {
+  const data = {
+    value: value.trim(),
+    count: 47
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary48(value) {
+  const data = {
+    value: value.trim(),
+    count: 48
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary49(value) {
+  const data = {
+    value: value.trim(),
+    count: 49
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary50(value) {
+  const data = {
+    value: value.trim(),
+    count: 50
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary51(value) {
+  const data = {
+    value: value.trim(),
+    count: 51
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary52(value) {
+  const data = {
+    value: value.trim(),
+    count: 52
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary53(value) {
+  const data = {
+    value: value.trim(),
+    count: 53
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary54(value) {
+  const data = {
+    value: value.trim(),
+    count: 54
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary55(value) {
+  const data = {
+    value: value.trim(),
+    count: 55
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary56(value) {
+  const data = {
+    value: value.trim(),
+    count: 56
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary57(value) {
+  const data = {
+    value: value.trim(),
+    count: 57
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary58(value) {
+  const data = {
+    value: value.trim(),
+    count: 58
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary59(value) {
+  const data = {
+    value: value.trim(),
+    count: 59
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary60(value) {
+  const data = {
+    value: value.trim(),
+    count: 60
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary61(value) {
+  const data = {
+    value: value.trim(),
+    count: 61
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary62(value) {
+  const data = {
+    value: value.trim(),
+    count: 62
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary63(value) {
+  const data = {
+    value: value.trim(),
+    count: 63
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary64(value) {
+  const data = {
+    value: value.trim(),
+    count: 64
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary65(value) {
+  const data = {
+    value: value.trim(),
+    count: 65
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary66(value) {
+  const data = {
+    value: value.trim(),
+    count: 66
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary67(value) {
+  const data = {
+    value: value.trim(),
+    count: 67
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary68(value) {
+  const data = {
+    value: value.trim(),
+    count: 68
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary69(value) {
+  const data = {
+    value: value.trim(),
+    count: 69
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary70(value) {
+  const data = {
+    value: value.trim(),
+    count: 70
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary71(value) {
+  const data = {
+    value: value.trim(),
+    count: 71
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary72(value) {
+  const data = {
+    value: value.trim(),
+    count: 72
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary73(value) {
+  const data = {
+    value: value.trim(),
+    count: 73
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary74(value) {
+  const data = {
+    value: value.trim(),
+    count: 74
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary75(value) {
+  const data = {
+    value: value.trim(),
+    count: 75
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary76(value) {
+  const data = {
+    value: value.trim(),
+    count: 76
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary77(value) {
+  const data = {
+    value: value.trim(),
+    count: 77
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary78(value) {
+  const data = {
+    value: value.trim(),
+    count: 78
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}
+export function ordinary79(value) {
+  const data = {
+    value: value.trim(),
+    count: 79
+  };
+  return {
+    label: data.value.toUpperCase(),
+    score: data.count * 2
+  };
+}

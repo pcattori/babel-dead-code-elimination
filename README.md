@@ -1,4 +1,3 @@
-
 # babel-dead-code-elimination
 
 Composable primitives for dead code elimination in Babel
@@ -107,6 +106,64 @@ const startup = initializeApplication()
 ```
 
 `greeting` was referenced before the custom transform and became unused afterward, so it can be removed. `startup` was already unused, so it is preserved along with its potentially side-effectful initializer.
+
+### Reuse scopes from an earlier traversal
+
+If a read-only Babel traversal has already initialized scopes, pass
+`{ scopeIsFresh: true }` to avoid rebuilding them during reference collection:
+
+```ts
+traverse(ast, {
+  // Inspect the AST without changing it.
+})
+const referenced = findReferencedIdentifiers(ast, { scopeIsFresh: true })
+```
+
+Only use this option when the AST has not changed since that traversal. Omit it
+after arbitrary AST mutations so the collector refreshes binding information.
+`deadCodeElimination` always refreshes scopes after transformations.
+
+### Share an analysis traversal
+
+Use `collectReferencedIdentifiers` when your transform first inspects the AST.
+It collects declaration paths during your analysis traversal and returns a
+function that computes reference membership only when needed:
+
+```ts
+import {
+  collectReferencedIdentifiers,
+  deadCodeElimination,
+} from "babel-dead-code-elimination"
+
+export function transform(ast: AST) {
+  const calls = []
+  const readReferences = collectReferencedIdentifiers(ast, {
+    visitor: {
+      CallExpression(path) {
+        if (path.get("callee").isIdentifier({ name: "removeThisCall" })) {
+          calls.push(path)
+        }
+      },
+    },
+  })
+  if (calls.length === 0) {
+    return
+  }
+  const referenced = readReferences()
+  for (const call of calls) {
+    call.remove()
+  }
+  deadCodeElimination(ast, referenced)
+}
+```
+
+The visitor must preserve the AST and bindings and visit every node. Do not
+use `skip`, `stop`, `denylist`, `shouldSkip`, or other traversal pruning. Invoke
+the returned function before any AST or binding mutation; it is not a snapshot of a mutable
+AST. If the analysis finds no transformation, discard the function to avoid
+reference-graph analysis. The optional `scopeIsFresh` flag follows the same
+contract as `findReferencedIdentifiers`; otherwise the collector refreshes
+scopes before your visitor runs.
 
 ## Prior art
 

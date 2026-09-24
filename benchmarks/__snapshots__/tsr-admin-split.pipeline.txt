@@ -1,0 +1,280 @@
+import { createFileRoute, notFound } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
+import { queryOptions } from "@tanstack/react-query";
+import { z } from "zod";
+import * as schema from "~/server/schema";
+import { type ColumnDef } from "~/components/data-table";
+const Pagination = z.object({
+  page: z.number().int().min(1).default(1),
+  pageSize: z.number().int().min(1).max(200).default(50),
+  search: z.string().optional()
+});
+
+// --- post -------------------------------------------------------------
+type PostRow = typeof schema.posts.$inferSelect;
+export const listPosts = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_0"));
+export const deletePost = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_1"));
+export const postsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["posts", params],
+  queryFn: () => listPosts({
+    data: params
+  })
+});
+// --- comment -------------------------------------------------------------
+type CommentRow = typeof schema.comments.$inferSelect;
+export const listComments = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_2"));
+export const deleteComment = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_3"));
+export const commentsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["comments", params],
+  queryFn: () => listComments({
+    data: params
+  })
+});
+// --- user -------------------------------------------------------------
+type UserRow = typeof schema.users.$inferSelect;
+export const listUsers = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_4"));
+export const deleteUser = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_5"));
+export const usersQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["users", params],
+  queryFn: () => listUsers({
+    data: params
+  })
+});
+// --- team -------------------------------------------------------------
+type TeamRow = typeof schema.teams.$inferSelect;
+export const listTeams = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_6"));
+export const deleteTeam = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_7"));
+export const teamsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["teams", params],
+  queryFn: () => listTeams({
+    data: params
+  })
+});
+// --- project -------------------------------------------------------------
+type ProjectRow = typeof schema.projects.$inferSelect;
+export const listProjects = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_8"));
+export const deleteProject = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_9"));
+export const projectsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["projects", params],
+  queryFn: () => listProjects({
+    data: params
+  })
+});
+// --- invoice -------------------------------------------------------------
+type InvoiceRow = typeof schema.invoices.$inferSelect;
+export const listInvoices = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_10"));
+export const deleteInvoice = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_11"));
+export const invoicesQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["invoices", params],
+  queryFn: () => listInvoices({
+    data: params
+  })
+});
+// --- subscription -------------------------------------------------------------
+type SubscriptionRow = typeof schema.subscriptions.$inferSelect;
+export const listSubscriptions = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_12"));
+export const deleteSubscription = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_13"));
+export const subscriptionsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["subscriptions", params],
+  queryFn: () => listSubscriptions({
+    data: params
+  })
+});
+// --- report -------------------------------------------------------------
+type ReportRow = typeof schema.reports.$inferSelect;
+export const listReports = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_14"));
+export const deleteReport = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_15"));
+export const reportsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["reports", params],
+  queryFn: () => listReports({
+    data: params
+  })
+});
+// --- notification -------------------------------------------------------------
+type NotificationRow = typeof schema.notifications.$inferSelect;
+export const listNotifications = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_16"));
+export const deleteNotification = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_17"));
+export const notificationsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["notifications", params],
+  queryFn: () => listNotifications({
+    data: params
+  })
+});
+// --- integration -------------------------------------------------------------
+type IntegrationRow = typeof schema.integrations.$inferSelect;
+export const listIntegrations = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_18"));
+export const deleteIntegration = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_19"));
+export const integrationsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["integrations", params],
+  queryFn: () => listIntegrations({
+    data: params
+  })
+});
+// --- apiKey -------------------------------------------------------------
+type ApiKeyRow = typeof schema.apiKeys.$inferSelect;
+export const listApiKeys = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_20"));
+export const deleteApiKey = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_21"));
+export const apiKeysQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["apiKeys", params],
+  queryFn: () => listApiKeys({
+    data: params
+  })
+});
+// --- auditEvent -------------------------------------------------------------
+type AuditEventRow = typeof schema.auditEvents.$inferSelect;
+export const listAuditEvents = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_22"));
+export const deleteAuditEvent = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_23"));
+export const auditEventsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["auditEvents", params],
+  queryFn: () => listAuditEvents({
+    data: params
+  })
+});
+export const getDashboardStats = createServerFn({
+  method: "GET"
+}).handler(createClientRpc("fn_24"));
+export const Route = createFileRoute("/admin")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    q: typeof search.q === "string" ? search.q : undefined
+  }),
+  loaderDeps: ({
+    search: {
+      q
+    }
+  }) => ({
+    q
+  }),
+  loader: async ({
+    context: {
+      queryClient
+    },
+    deps: {
+      q
+    }
+  }) => {
+    await Promise.all([queryClient.ensureQueryData(postsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(commentsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(usersQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(teamsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(projectsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(invoicesQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(subscriptionsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(reportsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(notificationsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(integrationsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(apiKeysQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(auditEventsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    }))]);
+  },
+  component: lazyRouteComponent($$splitComponentImporter, "component"),
+  pendingComponent: lazyRouteComponent($$splitComponentImporter, "pendingComponent"),
+  errorComponent: lazyRouteComponent($$splitComponentImporter, "errorComponent")
+});

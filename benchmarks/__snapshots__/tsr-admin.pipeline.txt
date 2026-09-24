@@ -1,0 +1,1446 @@
+import * as React from "react";
+import { createFileRoute, Link, notFound, useRouter } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
+import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { z } from "zod";
+import * as schema from "~/server/schema";
+import { Button } from "~/components/ui/button";
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "~/components/ui/dialog";
+import { DataTable, type ColumnDef } from "~/components/data-table";
+import { useToast } from "~/hooks/use-toast";
+import { formatCurrency, formatDate } from "~/lib/format";
+const Pagination = z.object({
+  page: z.number().int().min(1).default(1),
+  pageSize: z.number().int().min(1).max(200).default(50),
+  search: z.string().optional()
+});
+
+// --- post -------------------------------------------------------------
+type PostRow = typeof schema.posts.$inferSelect;
+export const listPosts = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_0"));
+export const deletePost = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_1"));
+export const postsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["posts", params],
+  queryFn: () => listPosts({
+    data: params
+  })
+});
+const postColumns: ColumnDef<Awaited<ReturnType<typeof queryPosts>>["rows"][number]>[] = [{
+  accessorKey: "id",
+  header: "ID"
+}, {
+  accessorKey: "name",
+  header: "Name"
+}, {
+  accessorKey: "createdAt",
+  header: "Created",
+  cell: ({
+    getValue
+  }) => formatDate(getValue<string>())
+}, {
+  id: "actions",
+  cell: ({
+    row
+  }) => <DeletePostButton id={row.original.id} />
+}];
+function DeletePostButton({
+  id
+}: {
+  id: string;
+}) {
+  const queryClient = useQueryClient();
+  const {
+    toast
+  } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deletePost({
+      data: {
+        ids: [id]
+      }
+    }),
+    onSuccess: ({
+      removed
+    }) => {
+      toast({
+        title: `Removed ${removed} post(s)`
+      });
+      return queryClient.invalidateQueries({
+        queryKey: ["posts"]
+      });
+    }
+  });
+  return <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete post?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>;
+}
+function PostPanel({
+  search
+}: {
+  search?: string;
+}) {
+  const [page, setPage] = React.useState(1);
+  const {
+    data
+  } = useSuspenseQuery(postsQuery({
+    page,
+    pageSize: 50,
+    search
+  }));
+  const {
+    rows,
+    count,
+    pageSize
+  } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Posts ({count})</h2>
+      <DataTable columns={postColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>;
+}
+
+// --- comment -------------------------------------------------------------
+type CommentRow = typeof schema.comments.$inferSelect;
+export const listComments = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_2"));
+export const deleteComment = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_3"));
+export const commentsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["comments", params],
+  queryFn: () => listComments({
+    data: params
+  })
+});
+const commentColumns: ColumnDef<Awaited<ReturnType<typeof queryComments>>["rows"][number]>[] = [{
+  accessorKey: "id",
+  header: "ID"
+}, {
+  accessorKey: "name",
+  header: "Name"
+}, {
+  accessorKey: "createdAt",
+  header: "Created",
+  cell: ({
+    getValue
+  }) => formatDate(getValue<string>())
+}, {
+  id: "actions",
+  cell: ({
+    row
+  }) => <DeleteCommentButton id={row.original.id} />
+}];
+function DeleteCommentButton({
+  id
+}: {
+  id: string;
+}) {
+  const queryClient = useQueryClient();
+  const {
+    toast
+  } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteComment({
+      data: {
+        ids: [id]
+      }
+    }),
+    onSuccess: ({
+      removed
+    }) => {
+      toast({
+        title: `Removed ${removed} comment(s)`
+      });
+      return queryClient.invalidateQueries({
+        queryKey: ["comments"]
+      });
+    }
+  });
+  return <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete comment?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>;
+}
+function CommentPanel({
+  search
+}: {
+  search?: string;
+}) {
+  const [page, setPage] = React.useState(1);
+  const {
+    data
+  } = useSuspenseQuery(commentsQuery({
+    page,
+    pageSize: 50,
+    search
+  }));
+  const {
+    rows,
+    count,
+    pageSize
+  } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Comments ({count})</h2>
+      <DataTable columns={commentColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>;
+}
+
+// --- user -------------------------------------------------------------
+type UserRow = typeof schema.users.$inferSelect;
+export const listUsers = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_4"));
+export const deleteUser = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_5"));
+export const usersQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["users", params],
+  queryFn: () => listUsers({
+    data: params
+  })
+});
+const userColumns: ColumnDef<Awaited<ReturnType<typeof queryUsers>>["rows"][number]>[] = [{
+  accessorKey: "id",
+  header: "ID"
+}, {
+  accessorKey: "name",
+  header: "Name"
+}, {
+  accessorKey: "createdAt",
+  header: "Created",
+  cell: ({
+    getValue
+  }) => formatDate(getValue<string>())
+}, {
+  id: "actions",
+  cell: ({
+    row
+  }) => <DeleteUserButton id={row.original.id} />
+}];
+function DeleteUserButton({
+  id
+}: {
+  id: string;
+}) {
+  const queryClient = useQueryClient();
+  const {
+    toast
+  } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteUser({
+      data: {
+        ids: [id]
+      }
+    }),
+    onSuccess: ({
+      removed
+    }) => {
+      toast({
+        title: `Removed ${removed} user(s)`
+      });
+      return queryClient.invalidateQueries({
+        queryKey: ["users"]
+      });
+    }
+  });
+  return <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete user?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>;
+}
+function UserPanel({
+  search
+}: {
+  search?: string;
+}) {
+  const [page, setPage] = React.useState(1);
+  const {
+    data
+  } = useSuspenseQuery(usersQuery({
+    page,
+    pageSize: 50,
+    search
+  }));
+  const {
+    rows,
+    count,
+    pageSize
+  } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Users ({count})</h2>
+      <DataTable columns={userColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>;
+}
+
+// --- team -------------------------------------------------------------
+type TeamRow = typeof schema.teams.$inferSelect;
+export const listTeams = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_6"));
+export const deleteTeam = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_7"));
+export const teamsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["teams", params],
+  queryFn: () => listTeams({
+    data: params
+  })
+});
+const teamColumns: ColumnDef<Awaited<ReturnType<typeof queryTeams>>["rows"][number]>[] = [{
+  accessorKey: "id",
+  header: "ID"
+}, {
+  accessorKey: "name",
+  header: "Name"
+}, {
+  accessorKey: "createdAt",
+  header: "Created",
+  cell: ({
+    getValue
+  }) => formatDate(getValue<string>())
+}, {
+  id: "actions",
+  cell: ({
+    row
+  }) => <DeleteTeamButton id={row.original.id} />
+}];
+function DeleteTeamButton({
+  id
+}: {
+  id: string;
+}) {
+  const queryClient = useQueryClient();
+  const {
+    toast
+  } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteTeam({
+      data: {
+        ids: [id]
+      }
+    }),
+    onSuccess: ({
+      removed
+    }) => {
+      toast({
+        title: `Removed ${removed} team(s)`
+      });
+      return queryClient.invalidateQueries({
+        queryKey: ["teams"]
+      });
+    }
+  });
+  return <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete team?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>;
+}
+function TeamPanel({
+  search
+}: {
+  search?: string;
+}) {
+  const [page, setPage] = React.useState(1);
+  const {
+    data
+  } = useSuspenseQuery(teamsQuery({
+    page,
+    pageSize: 50,
+    search
+  }));
+  const {
+    rows,
+    count,
+    pageSize
+  } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Teams ({count})</h2>
+      <DataTable columns={teamColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>;
+}
+
+// --- project -------------------------------------------------------------
+type ProjectRow = typeof schema.projects.$inferSelect;
+export const listProjects = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_8"));
+export const deleteProject = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_9"));
+export const projectsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["projects", params],
+  queryFn: () => listProjects({
+    data: params
+  })
+});
+const projectColumns: ColumnDef<Awaited<ReturnType<typeof queryProjects>>["rows"][number]>[] = [{
+  accessorKey: "id",
+  header: "ID"
+}, {
+  accessorKey: "name",
+  header: "Name"
+}, {
+  accessorKey: "createdAt",
+  header: "Created",
+  cell: ({
+    getValue
+  }) => formatDate(getValue<string>())
+}, {
+  id: "actions",
+  cell: ({
+    row
+  }) => <DeleteProjectButton id={row.original.id} />
+}];
+function DeleteProjectButton({
+  id
+}: {
+  id: string;
+}) {
+  const queryClient = useQueryClient();
+  const {
+    toast
+  } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteProject({
+      data: {
+        ids: [id]
+      }
+    }),
+    onSuccess: ({
+      removed
+    }) => {
+      toast({
+        title: `Removed ${removed} project(s)`
+      });
+      return queryClient.invalidateQueries({
+        queryKey: ["projects"]
+      });
+    }
+  });
+  return <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete project?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>;
+}
+function ProjectPanel({
+  search
+}: {
+  search?: string;
+}) {
+  const [page, setPage] = React.useState(1);
+  const {
+    data
+  } = useSuspenseQuery(projectsQuery({
+    page,
+    pageSize: 50,
+    search
+  }));
+  const {
+    rows,
+    count,
+    pageSize
+  } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Projects ({count})</h2>
+      <DataTable columns={projectColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>;
+}
+
+// --- invoice -------------------------------------------------------------
+type InvoiceRow = typeof schema.invoices.$inferSelect;
+export const listInvoices = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_10"));
+export const deleteInvoice = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_11"));
+export const invoicesQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["invoices", params],
+  queryFn: () => listInvoices({
+    data: params
+  })
+});
+const invoiceColumns: ColumnDef<Awaited<ReturnType<typeof queryInvoices>>["rows"][number]>[] = [{
+  accessorKey: "id",
+  header: "ID"
+}, {
+  accessorKey: "name",
+  header: "Name"
+}, {
+  accessorKey: "createdAt",
+  header: "Created",
+  cell: ({
+    getValue
+  }) => formatDate(getValue<string>())
+}, {
+  id: "actions",
+  cell: ({
+    row
+  }) => <DeleteInvoiceButton id={row.original.id} />
+}];
+function DeleteInvoiceButton({
+  id
+}: {
+  id: string;
+}) {
+  const queryClient = useQueryClient();
+  const {
+    toast
+  } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteInvoice({
+      data: {
+        ids: [id]
+      }
+    }),
+    onSuccess: ({
+      removed
+    }) => {
+      toast({
+        title: `Removed ${removed} invoice(s)`
+      });
+      return queryClient.invalidateQueries({
+        queryKey: ["invoices"]
+      });
+    }
+  });
+  return <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete invoice?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>;
+}
+function InvoicePanel({
+  search
+}: {
+  search?: string;
+}) {
+  const [page, setPage] = React.useState(1);
+  const {
+    data
+  } = useSuspenseQuery(invoicesQuery({
+    page,
+    pageSize: 50,
+    search
+  }));
+  const {
+    rows,
+    count,
+    pageSize
+  } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Invoices ({count})</h2>
+      <DataTable columns={invoiceColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>;
+}
+
+// --- subscription -------------------------------------------------------------
+type SubscriptionRow = typeof schema.subscriptions.$inferSelect;
+export const listSubscriptions = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_12"));
+export const deleteSubscription = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_13"));
+export const subscriptionsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["subscriptions", params],
+  queryFn: () => listSubscriptions({
+    data: params
+  })
+});
+const subscriptionColumns: ColumnDef<Awaited<ReturnType<typeof querySubscriptions>>["rows"][number]>[] = [{
+  accessorKey: "id",
+  header: "ID"
+}, {
+  accessorKey: "name",
+  header: "Name"
+}, {
+  accessorKey: "createdAt",
+  header: "Created",
+  cell: ({
+    getValue
+  }) => formatDate(getValue<string>())
+}, {
+  id: "actions",
+  cell: ({
+    row
+  }) => <DeleteSubscriptionButton id={row.original.id} />
+}];
+function DeleteSubscriptionButton({
+  id
+}: {
+  id: string;
+}) {
+  const queryClient = useQueryClient();
+  const {
+    toast
+  } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteSubscription({
+      data: {
+        ids: [id]
+      }
+    }),
+    onSuccess: ({
+      removed
+    }) => {
+      toast({
+        title: `Removed ${removed} subscription(s)`
+      });
+      return queryClient.invalidateQueries({
+        queryKey: ["subscriptions"]
+      });
+    }
+  });
+  return <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete subscription?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>;
+}
+function SubscriptionPanel({
+  search
+}: {
+  search?: string;
+}) {
+  const [page, setPage] = React.useState(1);
+  const {
+    data
+  } = useSuspenseQuery(subscriptionsQuery({
+    page,
+    pageSize: 50,
+    search
+  }));
+  const {
+    rows,
+    count,
+    pageSize
+  } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Subscriptions ({count})</h2>
+      <DataTable columns={subscriptionColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>;
+}
+
+// --- report -------------------------------------------------------------
+type ReportRow = typeof schema.reports.$inferSelect;
+export const listReports = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_14"));
+export const deleteReport = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_15"));
+export const reportsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["reports", params],
+  queryFn: () => listReports({
+    data: params
+  })
+});
+const reportColumns: ColumnDef<Awaited<ReturnType<typeof queryReports>>["rows"][number]>[] = [{
+  accessorKey: "id",
+  header: "ID"
+}, {
+  accessorKey: "name",
+  header: "Name"
+}, {
+  accessorKey: "createdAt",
+  header: "Created",
+  cell: ({
+    getValue
+  }) => formatDate(getValue<string>())
+}, {
+  id: "actions",
+  cell: ({
+    row
+  }) => <DeleteReportButton id={row.original.id} />
+}];
+function DeleteReportButton({
+  id
+}: {
+  id: string;
+}) {
+  const queryClient = useQueryClient();
+  const {
+    toast
+  } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteReport({
+      data: {
+        ids: [id]
+      }
+    }),
+    onSuccess: ({
+      removed
+    }) => {
+      toast({
+        title: `Removed ${removed} report(s)`
+      });
+      return queryClient.invalidateQueries({
+        queryKey: ["reports"]
+      });
+    }
+  });
+  return <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete report?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>;
+}
+function ReportPanel({
+  search
+}: {
+  search?: string;
+}) {
+  const [page, setPage] = React.useState(1);
+  const {
+    data
+  } = useSuspenseQuery(reportsQuery({
+    page,
+    pageSize: 50,
+    search
+  }));
+  const {
+    rows,
+    count,
+    pageSize
+  } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Reports ({count})</h2>
+      <DataTable columns={reportColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>;
+}
+
+// --- notification -------------------------------------------------------------
+type NotificationRow = typeof schema.notifications.$inferSelect;
+export const listNotifications = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_16"));
+export const deleteNotification = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_17"));
+export const notificationsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["notifications", params],
+  queryFn: () => listNotifications({
+    data: params
+  })
+});
+const notificationColumns: ColumnDef<Awaited<ReturnType<typeof queryNotifications>>["rows"][number]>[] = [{
+  accessorKey: "id",
+  header: "ID"
+}, {
+  accessorKey: "name",
+  header: "Name"
+}, {
+  accessorKey: "createdAt",
+  header: "Created",
+  cell: ({
+    getValue
+  }) => formatDate(getValue<string>())
+}, {
+  id: "actions",
+  cell: ({
+    row
+  }) => <DeleteNotificationButton id={row.original.id} />
+}];
+function DeleteNotificationButton({
+  id
+}: {
+  id: string;
+}) {
+  const queryClient = useQueryClient();
+  const {
+    toast
+  } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteNotification({
+      data: {
+        ids: [id]
+      }
+    }),
+    onSuccess: ({
+      removed
+    }) => {
+      toast({
+        title: `Removed ${removed} notification(s)`
+      });
+      return queryClient.invalidateQueries({
+        queryKey: ["notifications"]
+      });
+    }
+  });
+  return <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete notification?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>;
+}
+function NotificationPanel({
+  search
+}: {
+  search?: string;
+}) {
+  const [page, setPage] = React.useState(1);
+  const {
+    data
+  } = useSuspenseQuery(notificationsQuery({
+    page,
+    pageSize: 50,
+    search
+  }));
+  const {
+    rows,
+    count,
+    pageSize
+  } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Notifications ({count})</h2>
+      <DataTable columns={notificationColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>;
+}
+
+// --- integration -------------------------------------------------------------
+type IntegrationRow = typeof schema.integrations.$inferSelect;
+export const listIntegrations = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_18"));
+export const deleteIntegration = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_19"));
+export const integrationsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["integrations", params],
+  queryFn: () => listIntegrations({
+    data: params
+  })
+});
+const integrationColumns: ColumnDef<Awaited<ReturnType<typeof queryIntegrations>>["rows"][number]>[] = [{
+  accessorKey: "id",
+  header: "ID"
+}, {
+  accessorKey: "name",
+  header: "Name"
+}, {
+  accessorKey: "createdAt",
+  header: "Created",
+  cell: ({
+    getValue
+  }) => formatDate(getValue<string>())
+}, {
+  id: "actions",
+  cell: ({
+    row
+  }) => <DeleteIntegrationButton id={row.original.id} />
+}];
+function DeleteIntegrationButton({
+  id
+}: {
+  id: string;
+}) {
+  const queryClient = useQueryClient();
+  const {
+    toast
+  } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteIntegration({
+      data: {
+        ids: [id]
+      }
+    }),
+    onSuccess: ({
+      removed
+    }) => {
+      toast({
+        title: `Removed ${removed} integration(s)`
+      });
+      return queryClient.invalidateQueries({
+        queryKey: ["integrations"]
+      });
+    }
+  });
+  return <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete integration?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>;
+}
+function IntegrationPanel({
+  search
+}: {
+  search?: string;
+}) {
+  const [page, setPage] = React.useState(1);
+  const {
+    data
+  } = useSuspenseQuery(integrationsQuery({
+    page,
+    pageSize: 50,
+    search
+  }));
+  const {
+    rows,
+    count,
+    pageSize
+  } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Integrations ({count})</h2>
+      <DataTable columns={integrationColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>;
+}
+
+// --- apiKey -------------------------------------------------------------
+type ApiKeyRow = typeof schema.apiKeys.$inferSelect;
+export const listApiKeys = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_20"));
+export const deleteApiKey = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_21"));
+export const apiKeysQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["apiKeys", params],
+  queryFn: () => listApiKeys({
+    data: params
+  })
+});
+const apiKeyColumns: ColumnDef<Awaited<ReturnType<typeof queryApiKeys>>["rows"][number]>[] = [{
+  accessorKey: "id",
+  header: "ID"
+}, {
+  accessorKey: "name",
+  header: "Name"
+}, {
+  accessorKey: "createdAt",
+  header: "Created",
+  cell: ({
+    getValue
+  }) => formatDate(getValue<string>())
+}, {
+  id: "actions",
+  cell: ({
+    row
+  }) => <DeleteApiKeyButton id={row.original.id} />
+}];
+function DeleteApiKeyButton({
+  id
+}: {
+  id: string;
+}) {
+  const queryClient = useQueryClient();
+  const {
+    toast
+  } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteApiKey({
+      data: {
+        ids: [id]
+      }
+    }),
+    onSuccess: ({
+      removed
+    }) => {
+      toast({
+        title: `Removed ${removed} apiKey(s)`
+      });
+      return queryClient.invalidateQueries({
+        queryKey: ["apiKeys"]
+      });
+    }
+  });
+  return <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete apiKey?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>;
+}
+function ApiKeyPanel({
+  search
+}: {
+  search?: string;
+}) {
+  const [page, setPage] = React.useState(1);
+  const {
+    data
+  } = useSuspenseQuery(apiKeysQuery({
+    page,
+    pageSize: 50,
+    search
+  }));
+  const {
+    rows,
+    count,
+    pageSize
+  } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return <section className="space-y-2">
+      <h2 className="text-lg font-semibold">ApiKeys ({count})</h2>
+      <DataTable columns={apiKeyColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>;
+}
+
+// --- auditEvent -------------------------------------------------------------
+type AuditEventRow = typeof schema.auditEvents.$inferSelect;
+export const listAuditEvents = createServerFn({
+  method: "GET"
+}).validator((input: unknown) => Pagination.parse(input)).handler(createClientRpc("fn_22"));
+export const deleteAuditEvent = createServerFn({
+  method: "POST"
+}).validator(z.object({
+  ids: z.array(z.string()).min(1)
+})).handler(createClientRpc("fn_23"));
+export const auditEventsQuery = (params: z.input<typeof Pagination>) => queryOptions({
+  queryKey: ["auditEvents", params],
+  queryFn: () => listAuditEvents({
+    data: params
+  })
+});
+const auditEventColumns: ColumnDef<Awaited<ReturnType<typeof queryAuditEvents>>["rows"][number]>[] = [{
+  accessorKey: "id",
+  header: "ID"
+}, {
+  accessorKey: "name",
+  header: "Name"
+}, {
+  accessorKey: "createdAt",
+  header: "Created",
+  cell: ({
+    getValue
+  }) => formatDate(getValue<string>())
+}, {
+  id: "actions",
+  cell: ({
+    row
+  }) => <DeleteAuditEventButton id={row.original.id} />
+}];
+function DeleteAuditEventButton({
+  id
+}: {
+  id: string;
+}) {
+  const queryClient = useQueryClient();
+  const {
+    toast
+  } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteAuditEvent({
+      data: {
+        ids: [id]
+      }
+    }),
+    onSuccess: ({
+      removed
+    }) => {
+      toast({
+        title: `Removed ${removed} auditEvent(s)`
+      });
+      return queryClient.invalidateQueries({
+        queryKey: ["auditEvents"]
+      });
+    }
+  });
+  return <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete auditEvent?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>;
+}
+function AuditEventPanel({
+  search
+}: {
+  search?: string;
+}) {
+  const [page, setPage] = React.useState(1);
+  const {
+    data
+  } = useSuspenseQuery(auditEventsQuery({
+    page,
+    pageSize: 50,
+    search
+  }));
+  const {
+    rows,
+    count,
+    pageSize
+  } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return <section className="space-y-2">
+      <h2 className="text-lg font-semibold">AuditEvents ({count})</h2>
+      <DataTable columns={auditEventColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>;
+}
+export const getDashboardStats = createServerFn({
+  method: "GET"
+}).handler(createClientRpc("fn_24"));
+function RevenueChart() {
+  const {
+    data
+  } = useSuspenseQuery(queryOptions({
+    queryKey: ["stats"],
+    queryFn: () => getDashboardStats()
+  }));
+  const max = Math.max(1, ...data.map(({
+    revenue
+  }) => revenue));
+  return <ol className="flex h-32 items-end gap-1">
+      {data.map(({
+      day,
+      revenue
+    }) => <li key={day} title={`${formatDate(day)}: ${formatCurrency(revenue)}`} style={{
+      height: `${revenue / max * 100}%`
+    }} className="w-2 bg-primary" />)}
+    </ol>;
+}
+export const Route = createFileRoute("/admin")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    q: typeof search.q === "string" ? search.q : undefined
+  }),
+  loaderDeps: ({
+    search: {
+      q
+    }
+  }) => ({
+    q
+  }),
+  loader: async ({
+    context: {
+      queryClient
+    },
+    deps: {
+      q
+    }
+  }) => {
+    await Promise.all([queryClient.ensureQueryData(postsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(commentsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(usersQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(teamsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(projectsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(invoicesQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(subscriptionsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(reportsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(notificationsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(integrationsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(apiKeysQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    })), queryClient.ensureQueryData(auditEventsQuery({
+      page: 1,
+      pageSize: 50,
+      search: q
+    }))]);
+  },
+  component: AdminComponent,
+  pendingComponent: () => <p>Loading…</p>,
+  errorComponent: AdminError
+});
+function AdminError({
+  error
+}: {
+  error: Error;
+}) {
+  const router = useRouter();
+  return <div role="alert">
+      <p>{error.message}</p>
+      <Button onClick={() => router.invalidate()}>Retry</Button>
+    </div>;
+}
+function AdminComponent() {
+  const {
+    q
+  } = Route.useSearch();
+  return <div className="grid gap-8 p-6">
+      <nav className="flex gap-4">
+        <Link to="/">Home</Link>
+        <Link to="/admin" search={{
+        q: undefined
+      }}>
+          Reset
+        </Link>
+      </nav>
+      <RevenueChart />
+      <PostPanel search={q} />
+      <CommentPanel search={q} />
+      <UserPanel search={q} />
+      <TeamPanel search={q} />
+      <ProjectPanel search={q} />
+      <InvoicePanel search={q} />
+      <SubscriptionPanel search={q} />
+      <ReportPanel search={q} />
+      <NotificationPanel search={q} />
+      <IntegrationPanel search={q} />
+      <ApiKeyPanel search={q} />
+      <AuditEventPanel search={q} />
+    </div>;
+}

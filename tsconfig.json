@@ -19,5 +19,7 @@
     "noEmit": true,
     /* If your code doesn't run in the DOM: */
     "lib": ["es2022"]
-  }
+  },
+  // Benchmark corpus modules are inputs, not project sources.
+  "exclude": ["node_modules", "dist", "benchmarks/corpus"]
 }

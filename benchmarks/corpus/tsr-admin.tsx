@@ -1,0 +1,1335 @@
+import * as React from "react";
+import { createFileRoute, Link, notFound, useRouter, redirect } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
+import { getWebRequest, setResponseStatus, setHeader } from "@tanstack/react-start/server";
+import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { z } from "zod";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { db } from "~/server/db";
+import * as schema from "~/server/schema";
+import { auth } from "~/server/auth";
+import { cache } from "~/server/cache";
+import { track } from "~/server/analytics";
+import { env } from "~/server/env";
+import { Button } from "~/components/ui/button";
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "~/components/ui/dialog";
+import { DataTable, type ColumnDef } from "~/components/data-table";
+import { useToast } from "~/hooks/use-toast";
+import { formatCurrency, formatDate } from "~/lib/format";
+
+const { ADMIN_EMAILS = "", FEATURE_FLAGS } = env;
+const adminEmails = new Set(ADMIN_EMAILS.split(",").filter(Boolean));
+const flags = JSON.parse(FEATURE_FLAGS ?? "{}") as Record<string, boolean>;
+
+async function requireSession() {
+  const request = getWebRequest();
+  const session = await auth.api.getSession({ headers: request.headers });
+  if (!session) {
+    setResponseStatus(401);
+    throw redirect({ to: "/login" });
+  }
+  return session;
+}
+
+async function requireAdmin() {
+  const session = await requireSession();
+  const { user } = session;
+  if (!adminEmails.has(user.email) && !flags.openAdmin) {
+    setResponseStatus(403);
+    throw new Error("Forbidden");
+  }
+  return session;
+}
+
+function cached<T>(key: string, ttl: number, load: () => Promise<T>): Promise<T> {
+  return cache.wrap(key, load, { ttl });
+}
+
+const Pagination = z.object({
+  page: z.number().int().min(1).default(1),
+  pageSize: z.number().int().min(1).max(200).default(50),
+  search: z.string().optional(),
+});
+
+// --- post -------------------------------------------------------------
+type PostRow = typeof schema.posts.$inferSelect;
+
+function serializePost(row: PostRow) {
+  const { id, createdAt, updatedAt, ...rest } = row as any;
+  return { id: String(id), createdAt: createdAt.toISOString(), updatedAt: updatedAt?.toISOString() ?? null, ...rest };
+}
+
+async function queryPosts({ page, pageSize, search }: z.infer<typeof Pagination>) {
+  const where = search ? sql`${schema.posts.name} ilike ${"%" + search + "%"}` : undefined;
+  const [rows, [{ count }]] = await Promise.all([
+    db.select().from(schema.posts).where(where).orderBy(desc(schema.posts.createdAt)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)` }).from(schema.posts).where(where),
+  ]);
+  return { rows: rows.map(serializePost), count, page, pageSize };
+}
+
+export const listPosts = createServerFn({ method: "GET" })
+  .validator((input: unknown) => Pagination.parse(input))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    setHeader("Cache-Control", "private, max-age=5");
+    return cached(`posts:${data.page}:${data.pageSize}:${data.search ?? ""}`, 5, () => queryPosts(data));
+  });
+
+export const deletePost = createServerFn({ method: "POST" })
+  .validator(z.object({ ids: z.array(z.string()).min(1) }))
+  .handler(async ({ data: { ids } }) => {
+    const { user } = await requireAdmin();
+    const removed = await db.delete(schema.posts).where(inArray(schema.posts.id, ids)).returning();
+    await track(user.id, "post.delete", { count: removed.length });
+    await cache.invalidate("posts:");
+    return { removed: removed.length };
+  });
+
+export const postsQuery = (params: z.input<typeof Pagination>) =>
+  queryOptions({
+    queryKey: ["posts", params],
+    queryFn: () => listPosts({ data: params }),
+  });
+
+const postColumns: ColumnDef<Awaited<ReturnType<typeof queryPosts>>["rows"][number]>[] = [
+  { accessorKey: "id", header: "ID" },
+  { accessorKey: "name", header: "Name" },
+  { accessorKey: "createdAt", header: "Created", cell: ({ getValue }) => formatDate(getValue<string>()) },
+  {
+    id: "actions",
+    cell: ({ row }) => <DeletePostButton id={row.original.id} />,
+  },
+];
+
+function DeletePostButton({ id }: { id: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deletePost({ data: { ids: [id] } }),
+    onSuccess: ({ removed }) => {
+      toast({ title: `Removed ${removed} post(s)` });
+      return queryClient.invalidateQueries({ queryKey: ["posts"] });
+    },
+  });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete post?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PostPanel({ search }: { search?: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data } = useSuspenseQuery(postsQuery({ page, pageSize: 50, search }));
+  const { rows, count, pageSize } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Posts ({count})</h2>
+      <DataTable columns={postColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// --- comment -------------------------------------------------------------
+type CommentRow = typeof schema.comments.$inferSelect;
+
+function serializeComment(row: CommentRow) {
+  const { id, createdAt, updatedAt, ...rest } = row as any;
+  return { id: String(id), createdAt: createdAt.toISOString(), updatedAt: updatedAt?.toISOString() ?? null, ...rest };
+}
+
+async function queryComments({ page, pageSize, search }: z.infer<typeof Pagination>) {
+  const where = search ? sql`${schema.comments.name} ilike ${"%" + search + "%"}` : undefined;
+  const [rows, [{ count }]] = await Promise.all([
+    db.select().from(schema.comments).where(where).orderBy(desc(schema.comments.createdAt)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)` }).from(schema.comments).where(where),
+  ]);
+  return { rows: rows.map(serializeComment), count, page, pageSize };
+}
+
+export const listComments = createServerFn({ method: "GET" })
+  .validator((input: unknown) => Pagination.parse(input))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    setHeader("Cache-Control", "private, max-age=5");
+    return cached(`comments:${data.page}:${data.pageSize}:${data.search ?? ""}`, 5, () => queryComments(data));
+  });
+
+export const deleteComment = createServerFn({ method: "POST" })
+  .validator(z.object({ ids: z.array(z.string()).min(1) }))
+  .handler(async ({ data: { ids } }) => {
+    const { user } = await requireAdmin();
+    const removed = await db.delete(schema.comments).where(inArray(schema.comments.id, ids)).returning();
+    await track(user.id, "comment.delete", { count: removed.length });
+    await cache.invalidate("comments:");
+    return { removed: removed.length };
+  });
+
+export const commentsQuery = (params: z.input<typeof Pagination>) =>
+  queryOptions({
+    queryKey: ["comments", params],
+    queryFn: () => listComments({ data: params }),
+  });
+
+const commentColumns: ColumnDef<Awaited<ReturnType<typeof queryComments>>["rows"][number]>[] = [
+  { accessorKey: "id", header: "ID" },
+  { accessorKey: "name", header: "Name" },
+  { accessorKey: "createdAt", header: "Created", cell: ({ getValue }) => formatDate(getValue<string>()) },
+  {
+    id: "actions",
+    cell: ({ row }) => <DeleteCommentButton id={row.original.id} />,
+  },
+];
+
+function DeleteCommentButton({ id }: { id: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteComment({ data: { ids: [id] } }),
+    onSuccess: ({ removed }) => {
+      toast({ title: `Removed ${removed} comment(s)` });
+      return queryClient.invalidateQueries({ queryKey: ["comments"] });
+    },
+  });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete comment?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function CommentPanel({ search }: { search?: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data } = useSuspenseQuery(commentsQuery({ page, pageSize: 50, search }));
+  const { rows, count, pageSize } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Comments ({count})</h2>
+      <DataTable columns={commentColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// --- user -------------------------------------------------------------
+type UserRow = typeof schema.users.$inferSelect;
+
+function serializeUser(row: UserRow) {
+  const { id, createdAt, updatedAt, ...rest } = row as any;
+  return { id: String(id), createdAt: createdAt.toISOString(), updatedAt: updatedAt?.toISOString() ?? null, ...rest };
+}
+
+async function queryUsers({ page, pageSize, search }: z.infer<typeof Pagination>) {
+  const where = search ? sql`${schema.users.name} ilike ${"%" + search + "%"}` : undefined;
+  const [rows, [{ count }]] = await Promise.all([
+    db.select().from(schema.users).where(where).orderBy(desc(schema.users.createdAt)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)` }).from(schema.users).where(where),
+  ]);
+  return { rows: rows.map(serializeUser), count, page, pageSize };
+}
+
+export const listUsers = createServerFn({ method: "GET" })
+  .validator((input: unknown) => Pagination.parse(input))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    setHeader("Cache-Control", "private, max-age=5");
+    return cached(`users:${data.page}:${data.pageSize}:${data.search ?? ""}`, 5, () => queryUsers(data));
+  });
+
+export const deleteUser = createServerFn({ method: "POST" })
+  .validator(z.object({ ids: z.array(z.string()).min(1) }))
+  .handler(async ({ data: { ids } }) => {
+    const { user } = await requireAdmin();
+    const removed = await db.delete(schema.users).where(inArray(schema.users.id, ids)).returning();
+    await track(user.id, "user.delete", { count: removed.length });
+    await cache.invalidate("users:");
+    return { removed: removed.length };
+  });
+
+export const usersQuery = (params: z.input<typeof Pagination>) =>
+  queryOptions({
+    queryKey: ["users", params],
+    queryFn: () => listUsers({ data: params }),
+  });
+
+const userColumns: ColumnDef<Awaited<ReturnType<typeof queryUsers>>["rows"][number]>[] = [
+  { accessorKey: "id", header: "ID" },
+  { accessorKey: "name", header: "Name" },
+  { accessorKey: "createdAt", header: "Created", cell: ({ getValue }) => formatDate(getValue<string>()) },
+  {
+    id: "actions",
+    cell: ({ row }) => <DeleteUserButton id={row.original.id} />,
+  },
+];
+
+function DeleteUserButton({ id }: { id: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteUser({ data: { ids: [id] } }),
+    onSuccess: ({ removed }) => {
+      toast({ title: `Removed ${removed} user(s)` });
+      return queryClient.invalidateQueries({ queryKey: ["users"] });
+    },
+  });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete user?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function UserPanel({ search }: { search?: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data } = useSuspenseQuery(usersQuery({ page, pageSize: 50, search }));
+  const { rows, count, pageSize } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Users ({count})</h2>
+      <DataTable columns={userColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// --- team -------------------------------------------------------------
+type TeamRow = typeof schema.teams.$inferSelect;
+
+function serializeTeam(row: TeamRow) {
+  const { id, createdAt, updatedAt, ...rest } = row as any;
+  return { id: String(id), createdAt: createdAt.toISOString(), updatedAt: updatedAt?.toISOString() ?? null, ...rest };
+}
+
+async function queryTeams({ page, pageSize, search }: z.infer<typeof Pagination>) {
+  const where = search ? sql`${schema.teams.name} ilike ${"%" + search + "%"}` : undefined;
+  const [rows, [{ count }]] = await Promise.all([
+    db.select().from(schema.teams).where(where).orderBy(desc(schema.teams.createdAt)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)` }).from(schema.teams).where(where),
+  ]);
+  return { rows: rows.map(serializeTeam), count, page, pageSize };
+}
+
+export const listTeams = createServerFn({ method: "GET" })
+  .validator((input: unknown) => Pagination.parse(input))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    setHeader("Cache-Control", "private, max-age=5");
+    return cached(`teams:${data.page}:${data.pageSize}:${data.search ?? ""}`, 5, () => queryTeams(data));
+  });
+
+export const deleteTeam = createServerFn({ method: "POST" })
+  .validator(z.object({ ids: z.array(z.string()).min(1) }))
+  .handler(async ({ data: { ids } }) => {
+    const { user } = await requireAdmin();
+    const removed = await db.delete(schema.teams).where(inArray(schema.teams.id, ids)).returning();
+    await track(user.id, "team.delete", { count: removed.length });
+    await cache.invalidate("teams:");
+    return { removed: removed.length };
+  });
+
+export const teamsQuery = (params: z.input<typeof Pagination>) =>
+  queryOptions({
+    queryKey: ["teams", params],
+    queryFn: () => listTeams({ data: params }),
+  });
+
+const teamColumns: ColumnDef<Awaited<ReturnType<typeof queryTeams>>["rows"][number]>[] = [
+  { accessorKey: "id", header: "ID" },
+  { accessorKey: "name", header: "Name" },
+  { accessorKey: "createdAt", header: "Created", cell: ({ getValue }) => formatDate(getValue<string>()) },
+  {
+    id: "actions",
+    cell: ({ row }) => <DeleteTeamButton id={row.original.id} />,
+  },
+];
+
+function DeleteTeamButton({ id }: { id: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteTeam({ data: { ids: [id] } }),
+    onSuccess: ({ removed }) => {
+      toast({ title: `Removed ${removed} team(s)` });
+      return queryClient.invalidateQueries({ queryKey: ["teams"] });
+    },
+  });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete team?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function TeamPanel({ search }: { search?: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data } = useSuspenseQuery(teamsQuery({ page, pageSize: 50, search }));
+  const { rows, count, pageSize } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Teams ({count})</h2>
+      <DataTable columns={teamColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// --- project -------------------------------------------------------------
+type ProjectRow = typeof schema.projects.$inferSelect;
+
+function serializeProject(row: ProjectRow) {
+  const { id, createdAt, updatedAt, ...rest } = row as any;
+  return { id: String(id), createdAt: createdAt.toISOString(), updatedAt: updatedAt?.toISOString() ?? null, ...rest };
+}
+
+async function queryProjects({ page, pageSize, search }: z.infer<typeof Pagination>) {
+  const where = search ? sql`${schema.projects.name} ilike ${"%" + search + "%"}` : undefined;
+  const [rows, [{ count }]] = await Promise.all([
+    db.select().from(schema.projects).where(where).orderBy(desc(schema.projects.createdAt)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)` }).from(schema.projects).where(where),
+  ]);
+  return { rows: rows.map(serializeProject), count, page, pageSize };
+}
+
+export const listProjects = createServerFn({ method: "GET" })
+  .validator((input: unknown) => Pagination.parse(input))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    setHeader("Cache-Control", "private, max-age=5");
+    return cached(`projects:${data.page}:${data.pageSize}:${data.search ?? ""}`, 5, () => queryProjects(data));
+  });
+
+export const deleteProject = createServerFn({ method: "POST" })
+  .validator(z.object({ ids: z.array(z.string()).min(1) }))
+  .handler(async ({ data: { ids } }) => {
+    const { user } = await requireAdmin();
+    const removed = await db.delete(schema.projects).where(inArray(schema.projects.id, ids)).returning();
+    await track(user.id, "project.delete", { count: removed.length });
+    await cache.invalidate("projects:");
+    return { removed: removed.length };
+  });
+
+export const projectsQuery = (params: z.input<typeof Pagination>) =>
+  queryOptions({
+    queryKey: ["projects", params],
+    queryFn: () => listProjects({ data: params }),
+  });
+
+const projectColumns: ColumnDef<Awaited<ReturnType<typeof queryProjects>>["rows"][number]>[] = [
+  { accessorKey: "id", header: "ID" },
+  { accessorKey: "name", header: "Name" },
+  { accessorKey: "createdAt", header: "Created", cell: ({ getValue }) => formatDate(getValue<string>()) },
+  {
+    id: "actions",
+    cell: ({ row }) => <DeleteProjectButton id={row.original.id} />,
+  },
+];
+
+function DeleteProjectButton({ id }: { id: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteProject({ data: { ids: [id] } }),
+    onSuccess: ({ removed }) => {
+      toast({ title: `Removed ${removed} project(s)` });
+      return queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete project?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ProjectPanel({ search }: { search?: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data } = useSuspenseQuery(projectsQuery({ page, pageSize: 50, search }));
+  const { rows, count, pageSize } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Projects ({count})</h2>
+      <DataTable columns={projectColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// --- invoice -------------------------------------------------------------
+type InvoiceRow = typeof schema.invoices.$inferSelect;
+
+function serializeInvoice(row: InvoiceRow) {
+  const { id, createdAt, updatedAt, ...rest } = row as any;
+  return { id: String(id), createdAt: createdAt.toISOString(), updatedAt: updatedAt?.toISOString() ?? null, ...rest };
+}
+
+async function queryInvoices({ page, pageSize, search }: z.infer<typeof Pagination>) {
+  const where = search ? sql`${schema.invoices.name} ilike ${"%" + search + "%"}` : undefined;
+  const [rows, [{ count }]] = await Promise.all([
+    db.select().from(schema.invoices).where(where).orderBy(desc(schema.invoices.createdAt)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)` }).from(schema.invoices).where(where),
+  ]);
+  return { rows: rows.map(serializeInvoice), count, page, pageSize };
+}
+
+export const listInvoices = createServerFn({ method: "GET" })
+  .validator((input: unknown) => Pagination.parse(input))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    setHeader("Cache-Control", "private, max-age=5");
+    return cached(`invoices:${data.page}:${data.pageSize}:${data.search ?? ""}`, 5, () => queryInvoices(data));
+  });
+
+export const deleteInvoice = createServerFn({ method: "POST" })
+  .validator(z.object({ ids: z.array(z.string()).min(1) }))
+  .handler(async ({ data: { ids } }) => {
+    const { user } = await requireAdmin();
+    const removed = await db.delete(schema.invoices).where(inArray(schema.invoices.id, ids)).returning();
+    await track(user.id, "invoice.delete", { count: removed.length });
+    await cache.invalidate("invoices:");
+    return { removed: removed.length };
+  });
+
+export const invoicesQuery = (params: z.input<typeof Pagination>) =>
+  queryOptions({
+    queryKey: ["invoices", params],
+    queryFn: () => listInvoices({ data: params }),
+  });
+
+const invoiceColumns: ColumnDef<Awaited<ReturnType<typeof queryInvoices>>["rows"][number]>[] = [
+  { accessorKey: "id", header: "ID" },
+  { accessorKey: "name", header: "Name" },
+  { accessorKey: "createdAt", header: "Created", cell: ({ getValue }) => formatDate(getValue<string>()) },
+  {
+    id: "actions",
+    cell: ({ row }) => <DeleteInvoiceButton id={row.original.id} />,
+  },
+];
+
+function DeleteInvoiceButton({ id }: { id: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteInvoice({ data: { ids: [id] } }),
+    onSuccess: ({ removed }) => {
+      toast({ title: `Removed ${removed} invoice(s)` });
+      return queryClient.invalidateQueries({ queryKey: ["invoices"] });
+    },
+  });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete invoice?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function InvoicePanel({ search }: { search?: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data } = useSuspenseQuery(invoicesQuery({ page, pageSize: 50, search }));
+  const { rows, count, pageSize } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Invoices ({count})</h2>
+      <DataTable columns={invoiceColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// --- subscription -------------------------------------------------------------
+type SubscriptionRow = typeof schema.subscriptions.$inferSelect;
+
+function serializeSubscription(row: SubscriptionRow) {
+  const { id, createdAt, updatedAt, ...rest } = row as any;
+  return { id: String(id), createdAt: createdAt.toISOString(), updatedAt: updatedAt?.toISOString() ?? null, ...rest };
+}
+
+async function querySubscriptions({ page, pageSize, search }: z.infer<typeof Pagination>) {
+  const where = search ? sql`${schema.subscriptions.name} ilike ${"%" + search + "%"}` : undefined;
+  const [rows, [{ count }]] = await Promise.all([
+    db.select().from(schema.subscriptions).where(where).orderBy(desc(schema.subscriptions.createdAt)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)` }).from(schema.subscriptions).where(where),
+  ]);
+  return { rows: rows.map(serializeSubscription), count, page, pageSize };
+}
+
+export const listSubscriptions = createServerFn({ method: "GET" })
+  .validator((input: unknown) => Pagination.parse(input))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    setHeader("Cache-Control", "private, max-age=5");
+    return cached(`subscriptions:${data.page}:${data.pageSize}:${data.search ?? ""}`, 5, () => querySubscriptions(data));
+  });
+
+export const deleteSubscription = createServerFn({ method: "POST" })
+  .validator(z.object({ ids: z.array(z.string()).min(1) }))
+  .handler(async ({ data: { ids } }) => {
+    const { user } = await requireAdmin();
+    const removed = await db.delete(schema.subscriptions).where(inArray(schema.subscriptions.id, ids)).returning();
+    await track(user.id, "subscription.delete", { count: removed.length });
+    await cache.invalidate("subscriptions:");
+    return { removed: removed.length };
+  });
+
+export const subscriptionsQuery = (params: z.input<typeof Pagination>) =>
+  queryOptions({
+    queryKey: ["subscriptions", params],
+    queryFn: () => listSubscriptions({ data: params }),
+  });
+
+const subscriptionColumns: ColumnDef<Awaited<ReturnType<typeof querySubscriptions>>["rows"][number]>[] = [
+  { accessorKey: "id", header: "ID" },
+  { accessorKey: "name", header: "Name" },
+  { accessorKey: "createdAt", header: "Created", cell: ({ getValue }) => formatDate(getValue<string>()) },
+  {
+    id: "actions",
+    cell: ({ row }) => <DeleteSubscriptionButton id={row.original.id} />,
+  },
+];
+
+function DeleteSubscriptionButton({ id }: { id: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteSubscription({ data: { ids: [id] } }),
+    onSuccess: ({ removed }) => {
+      toast({ title: `Removed ${removed} subscription(s)` });
+      return queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
+    },
+  });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete subscription?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SubscriptionPanel({ search }: { search?: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data } = useSuspenseQuery(subscriptionsQuery({ page, pageSize: 50, search }));
+  const { rows, count, pageSize } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Subscriptions ({count})</h2>
+      <DataTable columns={subscriptionColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// --- report -------------------------------------------------------------
+type ReportRow = typeof schema.reports.$inferSelect;
+
+function serializeReport(row: ReportRow) {
+  const { id, createdAt, updatedAt, ...rest } = row as any;
+  return { id: String(id), createdAt: createdAt.toISOString(), updatedAt: updatedAt?.toISOString() ?? null, ...rest };
+}
+
+async function queryReports({ page, pageSize, search }: z.infer<typeof Pagination>) {
+  const where = search ? sql`${schema.reports.name} ilike ${"%" + search + "%"}` : undefined;
+  const [rows, [{ count }]] = await Promise.all([
+    db.select().from(schema.reports).where(where).orderBy(desc(schema.reports.createdAt)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)` }).from(schema.reports).where(where),
+  ]);
+  return { rows: rows.map(serializeReport), count, page, pageSize };
+}
+
+export const listReports = createServerFn({ method: "GET" })
+  .validator((input: unknown) => Pagination.parse(input))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    setHeader("Cache-Control", "private, max-age=5");
+    return cached(`reports:${data.page}:${data.pageSize}:${data.search ?? ""}`, 5, () => queryReports(data));
+  });
+
+export const deleteReport = createServerFn({ method: "POST" })
+  .validator(z.object({ ids: z.array(z.string()).min(1) }))
+  .handler(async ({ data: { ids } }) => {
+    const { user } = await requireAdmin();
+    const removed = await db.delete(schema.reports).where(inArray(schema.reports.id, ids)).returning();
+    await track(user.id, "report.delete", { count: removed.length });
+    await cache.invalidate("reports:");
+    return { removed: removed.length };
+  });
+
+export const reportsQuery = (params: z.input<typeof Pagination>) =>
+  queryOptions({
+    queryKey: ["reports", params],
+    queryFn: () => listReports({ data: params }),
+  });
+
+const reportColumns: ColumnDef<Awaited<ReturnType<typeof queryReports>>["rows"][number]>[] = [
+  { accessorKey: "id", header: "ID" },
+  { accessorKey: "name", header: "Name" },
+  { accessorKey: "createdAt", header: "Created", cell: ({ getValue }) => formatDate(getValue<string>()) },
+  {
+    id: "actions",
+    cell: ({ row }) => <DeleteReportButton id={row.original.id} />,
+  },
+];
+
+function DeleteReportButton({ id }: { id: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteReport({ data: { ids: [id] } }),
+    onSuccess: ({ removed }) => {
+      toast({ title: `Removed ${removed} report(s)` });
+      return queryClient.invalidateQueries({ queryKey: ["reports"] });
+    },
+  });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete report?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ReportPanel({ search }: { search?: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data } = useSuspenseQuery(reportsQuery({ page, pageSize: 50, search }));
+  const { rows, count, pageSize } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Reports ({count})</h2>
+      <DataTable columns={reportColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// --- notification -------------------------------------------------------------
+type NotificationRow = typeof schema.notifications.$inferSelect;
+
+function serializeNotification(row: NotificationRow) {
+  const { id, createdAt, updatedAt, ...rest } = row as any;
+  return { id: String(id), createdAt: createdAt.toISOString(), updatedAt: updatedAt?.toISOString() ?? null, ...rest };
+}
+
+async function queryNotifications({ page, pageSize, search }: z.infer<typeof Pagination>) {
+  const where = search ? sql`${schema.notifications.name} ilike ${"%" + search + "%"}` : undefined;
+  const [rows, [{ count }]] = await Promise.all([
+    db.select().from(schema.notifications).where(where).orderBy(desc(schema.notifications.createdAt)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)` }).from(schema.notifications).where(where),
+  ]);
+  return { rows: rows.map(serializeNotification), count, page, pageSize };
+}
+
+export const listNotifications = createServerFn({ method: "GET" })
+  .validator((input: unknown) => Pagination.parse(input))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    setHeader("Cache-Control", "private, max-age=5");
+    return cached(`notifications:${data.page}:${data.pageSize}:${data.search ?? ""}`, 5, () => queryNotifications(data));
+  });
+
+export const deleteNotification = createServerFn({ method: "POST" })
+  .validator(z.object({ ids: z.array(z.string()).min(1) }))
+  .handler(async ({ data: { ids } }) => {
+    const { user } = await requireAdmin();
+    const removed = await db.delete(schema.notifications).where(inArray(schema.notifications.id, ids)).returning();
+    await track(user.id, "notification.delete", { count: removed.length });
+    await cache.invalidate("notifications:");
+    return { removed: removed.length };
+  });
+
+export const notificationsQuery = (params: z.input<typeof Pagination>) =>
+  queryOptions({
+    queryKey: ["notifications", params],
+    queryFn: () => listNotifications({ data: params }),
+  });
+
+const notificationColumns: ColumnDef<Awaited<ReturnType<typeof queryNotifications>>["rows"][number]>[] = [
+  { accessorKey: "id", header: "ID" },
+  { accessorKey: "name", header: "Name" },
+  { accessorKey: "createdAt", header: "Created", cell: ({ getValue }) => formatDate(getValue<string>()) },
+  {
+    id: "actions",
+    cell: ({ row }) => <DeleteNotificationButton id={row.original.id} />,
+  },
+];
+
+function DeleteNotificationButton({ id }: { id: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteNotification({ data: { ids: [id] } }),
+    onSuccess: ({ removed }) => {
+      toast({ title: `Removed ${removed} notification(s)` });
+      return queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    },
+  });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete notification?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function NotificationPanel({ search }: { search?: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data } = useSuspenseQuery(notificationsQuery({ page, pageSize: 50, search }));
+  const { rows, count, pageSize } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Notifications ({count})</h2>
+      <DataTable columns={notificationColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// --- integration -------------------------------------------------------------
+type IntegrationRow = typeof schema.integrations.$inferSelect;
+
+function serializeIntegration(row: IntegrationRow) {
+  const { id, createdAt, updatedAt, ...rest } = row as any;
+  return { id: String(id), createdAt: createdAt.toISOString(), updatedAt: updatedAt?.toISOString() ?? null, ...rest };
+}
+
+async function queryIntegrations({ page, pageSize, search }: z.infer<typeof Pagination>) {
+  const where = search ? sql`${schema.integrations.name} ilike ${"%" + search + "%"}` : undefined;
+  const [rows, [{ count }]] = await Promise.all([
+    db.select().from(schema.integrations).where(where).orderBy(desc(schema.integrations.createdAt)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)` }).from(schema.integrations).where(where),
+  ]);
+  return { rows: rows.map(serializeIntegration), count, page, pageSize };
+}
+
+export const listIntegrations = createServerFn({ method: "GET" })
+  .validator((input: unknown) => Pagination.parse(input))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    setHeader("Cache-Control", "private, max-age=5");
+    return cached(`integrations:${data.page}:${data.pageSize}:${data.search ?? ""}`, 5, () => queryIntegrations(data));
+  });
+
+export const deleteIntegration = createServerFn({ method: "POST" })
+  .validator(z.object({ ids: z.array(z.string()).min(1) }))
+  .handler(async ({ data: { ids } }) => {
+    const { user } = await requireAdmin();
+    const removed = await db.delete(schema.integrations).where(inArray(schema.integrations.id, ids)).returning();
+    await track(user.id, "integration.delete", { count: removed.length });
+    await cache.invalidate("integrations:");
+    return { removed: removed.length };
+  });
+
+export const integrationsQuery = (params: z.input<typeof Pagination>) =>
+  queryOptions({
+    queryKey: ["integrations", params],
+    queryFn: () => listIntegrations({ data: params }),
+  });
+
+const integrationColumns: ColumnDef<Awaited<ReturnType<typeof queryIntegrations>>["rows"][number]>[] = [
+  { accessorKey: "id", header: "ID" },
+  { accessorKey: "name", header: "Name" },
+  { accessorKey: "createdAt", header: "Created", cell: ({ getValue }) => formatDate(getValue<string>()) },
+  {
+    id: "actions",
+    cell: ({ row }) => <DeleteIntegrationButton id={row.original.id} />,
+  },
+];
+
+function DeleteIntegrationButton({ id }: { id: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteIntegration({ data: { ids: [id] } }),
+    onSuccess: ({ removed }) => {
+      toast({ title: `Removed ${removed} integration(s)` });
+      return queryClient.invalidateQueries({ queryKey: ["integrations"] });
+    },
+  });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete integration?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function IntegrationPanel({ search }: { search?: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data } = useSuspenseQuery(integrationsQuery({ page, pageSize: 50, search }));
+  const { rows, count, pageSize } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">Integrations ({count})</h2>
+      <DataTable columns={integrationColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// --- apiKey -------------------------------------------------------------
+type ApiKeyRow = typeof schema.apiKeys.$inferSelect;
+
+function serializeApiKey(row: ApiKeyRow) {
+  const { id, createdAt, updatedAt, ...rest } = row as any;
+  return { id: String(id), createdAt: createdAt.toISOString(), updatedAt: updatedAt?.toISOString() ?? null, ...rest };
+}
+
+async function queryApiKeys({ page, pageSize, search }: z.infer<typeof Pagination>) {
+  const where = search ? sql`${schema.apiKeys.name} ilike ${"%" + search + "%"}` : undefined;
+  const [rows, [{ count }]] = await Promise.all([
+    db.select().from(schema.apiKeys).where(where).orderBy(desc(schema.apiKeys.createdAt)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)` }).from(schema.apiKeys).where(where),
+  ]);
+  return { rows: rows.map(serializeApiKey), count, page, pageSize };
+}
+
+export const listApiKeys = createServerFn({ method: "GET" })
+  .validator((input: unknown) => Pagination.parse(input))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    setHeader("Cache-Control", "private, max-age=5");
+    return cached(`apiKeys:${data.page}:${data.pageSize}:${data.search ?? ""}`, 5, () => queryApiKeys(data));
+  });
+
+export const deleteApiKey = createServerFn({ method: "POST" })
+  .validator(z.object({ ids: z.array(z.string()).min(1) }))
+  .handler(async ({ data: { ids } }) => {
+    const { user } = await requireAdmin();
+    const removed = await db.delete(schema.apiKeys).where(inArray(schema.apiKeys.id, ids)).returning();
+    await track(user.id, "apiKey.delete", { count: removed.length });
+    await cache.invalidate("apiKeys:");
+    return { removed: removed.length };
+  });
+
+export const apiKeysQuery = (params: z.input<typeof Pagination>) =>
+  queryOptions({
+    queryKey: ["apiKeys", params],
+    queryFn: () => listApiKeys({ data: params }),
+  });
+
+const apiKeyColumns: ColumnDef<Awaited<ReturnType<typeof queryApiKeys>>["rows"][number]>[] = [
+  { accessorKey: "id", header: "ID" },
+  { accessorKey: "name", header: "Name" },
+  { accessorKey: "createdAt", header: "Created", cell: ({ getValue }) => formatDate(getValue<string>()) },
+  {
+    id: "actions",
+    cell: ({ row }) => <DeleteApiKeyButton id={row.original.id} />,
+  },
+];
+
+function DeleteApiKeyButton({ id }: { id: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteApiKey({ data: { ids: [id] } }),
+    onSuccess: ({ removed }) => {
+      toast({ title: `Removed ${removed} apiKey(s)` });
+      return queryClient.invalidateQueries({ queryKey: ["apiKeys"] });
+    },
+  });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete apiKey?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ApiKeyPanel({ search }: { search?: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data } = useSuspenseQuery(apiKeysQuery({ page, pageSize: 50, search }));
+  const { rows, count, pageSize } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">ApiKeys ({count})</h2>
+      <DataTable columns={apiKeyColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// --- auditEvent -------------------------------------------------------------
+type AuditEventRow = typeof schema.auditEvents.$inferSelect;
+
+function serializeAuditEvent(row: AuditEventRow) {
+  const { id, createdAt, updatedAt, ...rest } = row as any;
+  return { id: String(id), createdAt: createdAt.toISOString(), updatedAt: updatedAt?.toISOString() ?? null, ...rest };
+}
+
+async function queryAuditEvents({ page, pageSize, search }: z.infer<typeof Pagination>) {
+  const where = search ? sql`${schema.auditEvents.name} ilike ${"%" + search + "%"}` : undefined;
+  const [rows, [{ count }]] = await Promise.all([
+    db.select().from(schema.auditEvents).where(where).orderBy(desc(schema.auditEvents.createdAt)).limit(pageSize).offset((page - 1) * pageSize),
+    db.select({ count: sql<number>`count(*)` }).from(schema.auditEvents).where(where),
+  ]);
+  return { rows: rows.map(serializeAuditEvent), count, page, pageSize };
+}
+
+export const listAuditEvents = createServerFn({ method: "GET" })
+  .validator((input: unknown) => Pagination.parse(input))
+  .handler(async ({ data }) => {
+    await requireAdmin();
+    setHeader("Cache-Control", "private, max-age=5");
+    return cached(`auditEvents:${data.page}:${data.pageSize}:${data.search ?? ""}`, 5, () => queryAuditEvents(data));
+  });
+
+export const deleteAuditEvent = createServerFn({ method: "POST" })
+  .validator(z.object({ ids: z.array(z.string()).min(1) }))
+  .handler(async ({ data: { ids } }) => {
+    const { user } = await requireAdmin();
+    const removed = await db.delete(schema.auditEvents).where(inArray(schema.auditEvents.id, ids)).returning();
+    await track(user.id, "auditEvent.delete", { count: removed.length });
+    await cache.invalidate("auditEvents:");
+    return { removed: removed.length };
+  });
+
+export const auditEventsQuery = (params: z.input<typeof Pagination>) =>
+  queryOptions({
+    queryKey: ["auditEvents", params],
+    queryFn: () => listAuditEvents({ data: params }),
+  });
+
+const auditEventColumns: ColumnDef<Awaited<ReturnType<typeof queryAuditEvents>>["rows"][number]>[] = [
+  { accessorKey: "id", header: "ID" },
+  { accessorKey: "name", header: "Name" },
+  { accessorKey: "createdAt", header: "Created", cell: ({ getValue }) => formatDate(getValue<string>()) },
+  {
+    id: "actions",
+    cell: ({ row }) => <DeleteAuditEventButton id={row.original.id} />,
+  },
+];
+
+function DeleteAuditEventButton({ id }: { id: string }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: () => deleteAuditEvent({ data: { ids: [id] } }),
+    onSuccess: ({ removed }) => {
+      toast({ title: `Removed ${removed} auditEvent(s)` });
+      return queryClient.invalidateQueries({ queryKey: ["auditEvents"] });
+    },
+  });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="destructive" size="sm" disabled={mutation.isPending}>
+          Delete
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogTitle>Delete auditEvent?</DialogTitle>
+        <Button onClick={() => mutation.mutate()}>Confirm</Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AuditEventPanel({ search }: { search?: string }) {
+  const [page, setPage] = React.useState(1);
+  const { data } = useSuspenseQuery(auditEventsQuery({ page, pageSize: 50, search }));
+  const { rows, count, pageSize } = data;
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+  return (
+    <section className="space-y-2">
+      <h2 className="text-lg font-semibold">AuditEvents ({count})</h2>
+      <DataTable columns={auditEventColumns} data={rows} />
+      <div className="flex gap-2">
+        <Button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          Previous
+        </Button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <Button disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+          Next
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+export const getDashboardStats = createServerFn({ method: "GET" }).handler(async () => {
+  await requireAdmin();
+  const rows = await db
+    .select({ day: sql<string>`date_trunc('day', created_at)`, revenue: sql<number>`sum(amount)` })
+    .from(schema.invoices)
+    .where(and(eq(schema.invoices.status, "paid")))
+    .groupBy(sql`1`);
+  return rows.map(({ day, revenue }) => ({ day, revenue: Number(revenue) }));
+});
+
+function RevenueChart() {
+  const { data } = useSuspenseQuery(queryOptions({ queryKey: ["stats"], queryFn: () => getDashboardStats() }));
+  const max = Math.max(1, ...data.map(({ revenue }) => revenue));
+  return (
+    <ol className="flex h-32 items-end gap-1">
+      {data.map(({ day, revenue }) => (
+        <li key={day} title={`${formatDate(day)}: ${formatCurrency(revenue)}`} style={{ height: `${(revenue / max) * 100}%` }} className="w-2 bg-primary" />
+      ))}
+    </ol>
+  );
+}
+
+export const Route = createFileRoute("/admin")({
+  validateSearch: (search: Record<string, unknown>) => ({ q: typeof search.q === "string" ? search.q : undefined }),
+  loaderDeps: ({ search: { q } }) => ({ q }),
+  loader: async ({ context: { queryClient }, deps: { q } }) => {
+    await Promise.all([
+      queryClient.ensureQueryData(postsQuery({ page: 1, pageSize: 50, search: q })),
+      queryClient.ensureQueryData(commentsQuery({ page: 1, pageSize: 50, search: q })),
+      queryClient.ensureQueryData(usersQuery({ page: 1, pageSize: 50, search: q })),
+      queryClient.ensureQueryData(teamsQuery({ page: 1, pageSize: 50, search: q })),
+      queryClient.ensureQueryData(projectsQuery({ page: 1, pageSize: 50, search: q })),
+      queryClient.ensureQueryData(invoicesQuery({ page: 1, pageSize: 50, search: q })),
+      queryClient.ensureQueryData(subscriptionsQuery({ page: 1, pageSize: 50, search: q })),
+      queryClient.ensureQueryData(reportsQuery({ page: 1, pageSize: 50, search: q })),
+      queryClient.ensureQueryData(notificationsQuery({ page: 1, pageSize: 50, search: q })),
+      queryClient.ensureQueryData(integrationsQuery({ page: 1, pageSize: 50, search: q })),
+      queryClient.ensureQueryData(apiKeysQuery({ page: 1, pageSize: 50, search: q })),
+      queryClient.ensureQueryData(auditEventsQuery({ page: 1, pageSize: 50, search: q })),
+    ]);
+  },
+  component: AdminComponent,
+  pendingComponent: () => <p>Loading…</p>,
+  errorComponent: AdminError,
+});
+
+function AdminError({ error }: { error: Error }) {
+  const router = useRouter();
+  return (
+    <div role="alert">
+      <p>{error.message}</p>
+      <Button onClick={() => router.invalidate()}>Retry</Button>
+    </div>
+  );
+}
+
+function AdminComponent() {
+  const { q } = Route.useSearch();
+  return (
+    <div className="grid gap-8 p-6">
+      <nav className="flex gap-4">
+        <Link to="/">Home</Link>
+        <Link to="/admin" search={{ q: undefined }}>
+          Reset
+        </Link>
+      </nav>
+      <RevenueChart />
+      <PostPanel search={q} />
+      <CommentPanel search={q} />
+      <UserPanel search={q} />
+      <TeamPanel search={q} />
+      <ProjectPanel search={q} />
+      <InvoicePanel search={q} />
+      <SubscriptionPanel search={q} />
+      <ReportPanel search={q} />
+      <NotificationPanel search={q} />
+      <IntegrationPanel search={q} />
+      <ApiKeyPanel search={q} />
+      <AuditEventPanel search={q} />
+    </div>
+  );
+}
