@@ -1,0 +1,640 @@
+export function select0({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit0,
+  keep0,
+  ...rest0
+} = source;
+export const out0 = rest0;
+export const drop0 = 0;
+export function select1({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit1,
+  keep1,
+  ...rest1
+} = source;
+export const out1 = rest1;
+export const drop1 = 0;
+export function select2({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit2,
+  keep2,
+  ...rest2
+} = source;
+export const out2 = rest2;
+export const drop2 = 0;
+export function select3({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit3,
+  keep3,
+  ...rest3
+} = source;
+export const out3 = rest3;
+export const drop3 = 0;
+export function select4({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit4,
+  keep4,
+  ...rest4
+} = source;
+export const out4 = rest4;
+export const drop4 = 0;
+export function select5({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit5,
+  keep5,
+  ...rest5
+} = source;
+export const out5 = rest5;
+export const drop5 = 0;
+export function select6({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit6,
+  keep6,
+  ...rest6
+} = source;
+export const out6 = rest6;
+export const drop6 = 0;
+export function select7({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit7,
+  keep7,
+  ...rest7
+} = source;
+export const out7 = rest7;
+export const drop7 = 0;
+export function select8({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit8,
+  keep8,
+  ...rest8
+} = source;
+export const out8 = rest8;
+export const drop8 = 0;
+export function select9({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit9,
+  keep9,
+  ...rest9
+} = source;
+export const out9 = rest9;
+export const drop9 = 0;
+export function select10({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit10,
+  keep10,
+  ...rest10
+} = source;
+export const out10 = rest10;
+export const drop10 = 0;
+export function select11({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit11,
+  keep11,
+  ...rest11
+} = source;
+export const out11 = rest11;
+export const drop11 = 0;
+export function select12({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit12,
+  keep12,
+  ...rest12
+} = source;
+export const out12 = rest12;
+export const drop12 = 0;
+export function select13({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit13,
+  keep13,
+  ...rest13
+} = source;
+export const out13 = rest13;
+export const drop13 = 0;
+export function select14({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit14,
+  keep14,
+  ...rest14
+} = source;
+export const out14 = rest14;
+export const drop14 = 0;
+export function select15({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit15,
+  keep15,
+  ...rest15
+} = source;
+export const out15 = rest15;
+export const drop15 = 0;
+export function select16({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit16,
+  keep16,
+  ...rest16
+} = source;
+export const out16 = rest16;
+export const drop16 = 0;
+export function select17({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit17,
+  keep17,
+  ...rest17
+} = source;
+export const out17 = rest17;
+export const drop17 = 0;
+export function select18({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit18,
+  keep18,
+  ...rest18
+} = source;
+export const out18 = rest18;
+export const drop18 = 0;
+export function select19({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit19,
+  keep19,
+  ...rest19
+} = source;
+export const out19 = rest19;
+export const drop19 = 0;
+export function select20({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit20,
+  keep20,
+  ...rest20
+} = source;
+export const out20 = rest20;
+export const drop20 = 0;
+export function select21({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit21,
+  keep21,
+  ...rest21
+} = source;
+export const out21 = rest21;
+export const drop21 = 0;
+export function select22({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit22,
+  keep22,
+  ...rest22
+} = source;
+export const out22 = rest22;
+export const drop22 = 0;
+export function select23({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit23,
+  keep23,
+  ...rest23
+} = source;
+export const out23 = rest23;
+export const drop23 = 0;
+export function select24({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit24,
+  keep24,
+  ...rest24
+} = source;
+export const out24 = rest24;
+export const drop24 = 0;
+export function select25({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit25,
+  keep25,
+  ...rest25
+} = source;
+export const out25 = rest25;
+export const drop25 = 0;
+export function select26({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit26,
+  keep26,
+  ...rest26
+} = source;
+export const out26 = rest26;
+export const drop26 = 0;
+export function select27({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit27,
+  keep27,
+  ...rest27
+} = source;
+export const out27 = rest27;
+export const drop27 = 0;
+export function select28({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit28,
+  keep28,
+  ...rest28
+} = source;
+export const out28 = rest28;
+export const drop28 = 0;
+export function select29({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit29,
+  keep29,
+  ...rest29
+} = source;
+export const out29 = rest29;
+export const drop29 = 0;
+export function select30({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit30,
+  keep30,
+  ...rest30
+} = source;
+export const out30 = rest30;
+export const drop30 = 0;
+export function select31({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit31,
+  keep31,
+  ...rest31
+} = source;
+export const out31 = rest31;
+export const drop31 = 0;
+export function select32({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit32,
+  keep32,
+  ...rest32
+} = source;
+export const out32 = rest32;
+export const drop32 = 0;
+export function select33({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit33,
+  keep33,
+  ...rest33
+} = source;
+export const out33 = rest33;
+export const drop33 = 0;
+export function select34({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit34,
+  keep34,
+  ...rest34
+} = source;
+export const out34 = rest34;
+export const drop34 = 0;
+export function select35({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit35,
+  keep35,
+  ...rest35
+} = source;
+export const out35 = rest35;
+export const drop35 = 0;
+export function select36({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit36,
+  keep36,
+  ...rest36
+} = source;
+export const out36 = rest36;
+export const drop36 = 0;
+export function select37({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit37,
+  keep37,
+  ...rest37
+} = source;
+export const out37 = rest37;
+export const drop37 = 0;
+export function select38({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit38,
+  keep38,
+  ...rest38
+} = source;
+export const out38 = rest38;
+export const drop38 = 0;
+export function select39({
+  a,
+  nested: {
+    b
+  },
+  ...rest
+}, [first, ...tail]) {
+  return [a, b, rest, first, tail];
+}
+const {
+  omit39,
+  keep39,
+  ...rest39
+} = source;
+export const out39 = rest39;
+export const drop39 = 0;

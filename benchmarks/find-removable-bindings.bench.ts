@@ -1,7 +1,8 @@
 import { bench, describe } from "vitest"
 import { parse } from "@babel/parser"
-import { Babel, traverse, type NodePath } from "./babel-esm"
-import findRemovableBindings from "./find-removable-bindings"
+import { Babel, traverse, type NodePath } from "../src/babel-esm"
+import findRemovableBindings from "../src/find-removable-bindings"
+import { registry } from "./workloads"
 
 // Helper to get program path from source
 const getProgramPath = (source: string): NodePath<Babel.Program> => {
@@ -285,5 +286,26 @@ describe("fast skip: violations and iterators", () => {
 
   bench("bindings with constant violations", () => {
     findRemovableBindings(violationsPath)
+  })
+})
+
+// ============================================================================
+// Scenario: Wide registries (many edges into one declaration)
+// ============================================================================
+describe("registries", () => {
+  const dependencyRegistryPath = getProgramPath(registry(48, 2))
+  const wideRegistryPath = getProgramPath(registry(512, 1))
+  const repeatedEdgesPath = getProgramPath(registry(256, 4))
+
+  bench("48 bindings referenced twice", () => {
+    findRemovableBindings(dependencyRegistryPath)
+  })
+
+  bench("512 bindings referenced once", () => {
+    findRemovableBindings(wideRegistryPath)
+  })
+
+  bench("256 bindings referenced four times", () => {
+    findRemovableBindings(repeatedEdgesPath)
   })
 })

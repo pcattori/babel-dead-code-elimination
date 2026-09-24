@@ -28,6 +28,7 @@
     "build": "tsdown",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bench": "vitest bench --run",
     "changeset": "changeset"
   },
   "packageManager": "pnpm@10.2.1",
