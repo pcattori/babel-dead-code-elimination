@@ -10,6 +10,7 @@ import * as Pattern from "./pattern"
 import { crawlProgram } from "./scope"
 import findRemovableBindings, {
   getDeclaredBinding,
+  isReferenced,
 } from "./find-removable-bindings"
 
 type IdentifierPath = NodePath<Babel.Identifier>
@@ -24,7 +25,7 @@ function addIfReferenced(
   referenced: Set<IdentifierPath>,
 ): void {
   const binding = getDeclaredBinding(ident)
-  if (binding && !removable.has(binding) && binding.referenced) {
+  if (binding && !removable.has(binding) && isReferenced(binding)) {
     referenced.add(ident)
   }
 }

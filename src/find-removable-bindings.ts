@@ -53,6 +53,7 @@ export default function findRemovableBindings(
     }
 
     for (const refPath of binding.referencePaths) {
+      if (isTypeOnlyReference(refPath)) continue
       // Walk up the AST to find which binding (if any) contains this reference
       let path: NodePath | null = refPath
       let containers: number[] | undefined
@@ -213,6 +214,28 @@ function isRestFilteredBinding(binding: Binding): boolean {
   return (
     t.isVariableDeclarator(declarator) &&
     isRestFiltered(declarator.id, binding.identifier)
+  )
+}
+
+/**
+ * Babel counts the name of a same-named TypeScript type alias, interface or
+ * overload signature as a reference to a value binding. These disappear with
+ * the types and never read the value.
+ */
+function isTypeOnlyReference(path: NodePath): boolean {
+  return (
+    path.key === "id" &&
+    (path.parentPath?.isTSTypeAliasDeclaration() ||
+      path.parentPath?.isTSInterfaceDeclaration() ||
+      path.parentPath?.isTSDeclareFunction()) === true
+  )
+}
+
+/** Whether code other than TypeScript declarations references the binding. */
+export function isReferenced(binding: Binding): boolean {
+  return (
+    binding.referenced &&
+    binding.referencePaths.some((path) => !isTypeOnlyReference(path))
   )
 }
 

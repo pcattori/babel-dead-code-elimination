@@ -12,6 +12,7 @@ import { crawlProgram } from "./scope"
 import findRemovableBindings, {
   getDeclaredBinding,
   isLoopIteratorBinding,
+  isReferenced,
 } from "./find-removable-bindings"
 
 /**
@@ -51,7 +52,7 @@ export default function (
     // If binding is part of a removable cycle, allow removal
     if (removableBindings.has(binding)) return true
 
-    if (binding.referenced) return false
+    if (isReferenced(binding)) return false
 
     // Preserve bindings with constant violations (assignments like x = 2)
     if (binding.constantViolations.length > 0) return false
@@ -166,6 +167,15 @@ export default function (
     if (path.isFunctionDeclaration()) {
       let id = path.get("id")
       if (id.isIdentifier() && shouldBeRemoved(id)) {
+        // TypeScript overload signatures cannot outlive their implementation.
+        for (let sibling of path.getAllPrevSiblings()) {
+          if (
+            sibling.isTSDeclareFunction() &&
+            sibling.node.id?.name === id.node.name
+          ) {
+            sibling.remove()
+          }
+        }
         needsAnotherPass = true
         path.remove()
       }
