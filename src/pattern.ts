@@ -74,6 +74,33 @@ function restFiltered(
   return undefined
 }
 
+/**
+ * The declarator whose id contains `path`, following only pattern links.
+ * Patterns in parameters, catch clauses, assignments or type annotations
+ * inside an initializer do not belong to the declarator.
+ */
+export function findDeclarator(
+  path: NodePath<t.ObjectPattern | t.ArrayPattern>,
+): NodePath<t.VariableDeclarator> | null {
+  let child: NodePath = path
+  let parent: NodePath | null = path.parentPath
+  while (parent) {
+    if (parent.isVariableDeclarator()) {
+      return child.key === "id" ? parent : null
+    }
+    let isPatternLink =
+      (parent.isObjectProperty() && child.key === "value") ||
+      parent.isObjectPattern() ||
+      parent.isArrayPattern() ||
+      (parent.isAssignmentPattern() && child.key === "left") ||
+      parent.isRestElement()
+    if (!isPatternLink) return null
+    child = parent
+    parent = parent.parentPath
+  }
+  return null
+}
+
 export function remove(path: NodePath<t.ObjectPattern | t.ArrayPattern>) {
   let parent = path.parentPath
   if (parent.isVariableDeclarator()) {

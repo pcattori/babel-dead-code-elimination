@@ -138,13 +138,9 @@ export default function (
       if (path.node.properties.length !== 0) {
         return
       }
-      let declarator = path.find((p) => p.isVariableDeclarator())
-      let isFunctionParam =
-        path.parentPath.isFunction() &&
-        path.parentPath.node.params.includes(path.node)
+      let declarator = Pattern.findDeclarator(path)
       if (
-        t.isVariableDeclarator(declarator?.node) &&
-        !isFunctionParam &&
+        declarator &&
         !Pattern.isRestFiltered(declarator.node.id, path.node)
       ) {
         Pattern.remove(path)
@@ -156,13 +152,9 @@ export default function (
       if (!path.node.elements.every((element) => element === null)) {
         return
       }
-      let declarator = path.find((p) => p.isVariableDeclarator())
-      let isFunctionParam =
-        path.parentPath.isFunction() &&
-        path.parentPath.node.params.includes(path.node)
+      let declarator = Pattern.findDeclarator(path)
       if (
-        t.isVariableDeclarator(declarator?.node) &&
-        !isFunctionParam &&
+        declarator &&
         !Pattern.isRestFiltered(declarator.node.id, path.node)
       ) {
         Pattern.remove(path)
