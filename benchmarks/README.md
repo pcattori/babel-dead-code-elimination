@@ -56,3 +56,17 @@ The empty control differs by only about 8.5 ns. The pipeline ranges overlap.
 | externally-used-48     | graph    |          4.780 (4.737–4.861) |          4.846 (4.804–4.864) |      +1.38% |
 | empty-bindings         | graph    |          0.081 (0.080–0.087) |          0.089 (0.081–0.091) |     +10.49% |
 | registry-48-end-to-end | pipeline | 1444.555 (1414.052–1479.216) | 1253.740 (1129.385–1469.763) |     -13.21% |
+
+## 02-scopes: Reuse fresh scopes
+
+The opt-in flag skips a redundant scope crawl when an earlier read-only traversal
+has already initialized scopes. Default behavior still refreshes scopes after
+arbitrary edits. This avoids rebuilding binding/reference metadata; it adds no cache.
+
+| Workload             | Phase      |              Before µs (IQR) |               After µs (IQR) | Time change |
+| -------------------- | ---------- | ---------------------------: | ---------------------------: | ----------: |
+| typical-module       | references |    382.793 (371.658–385.298) |    157.113 (148.708–189.214) |     -58.96% |
+| many-nested-scopes   | references | 3910.872 (3774.779–4016.776) | 1693.148 (1619.297–1796.581) |     -56.71% |
+| tiny-module          | references |         9.892 (9.674–10.222) |          4.593 (4.447–4.791) |     -53.57% |
+| default-api-control  | references |    890.135 (885.276–892.034) |    887.898 (878.151–905.305) |      -0.25% |
+| schema-40-end-to-end | pipeline   | 5890.935 (5781.365–5995.495) | 5499.375 (5371.797–5573.023) |      -6.65% |

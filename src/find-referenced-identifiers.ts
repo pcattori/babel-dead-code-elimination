@@ -22,13 +22,16 @@ function addIfReferenced(
 
 export default function (
   ast: ParseResult<Babel.File>,
+  options?: { scopeIsFresh?: boolean },
 ): Set<NodePath<Babel.Identifier>> {
   const referenced = new Set<NodePath<Babel.Identifier>>()
   let removable: Set<Binding>
 
   traverse(ast, {
     Program(path) {
-      path.scope.crawl()
+      if (!options?.scopeIsFresh) {
+        path.scope.crawl()
+      }
       removable = findRemovableBindings(path)
     },
     ImportDeclaration(path) {

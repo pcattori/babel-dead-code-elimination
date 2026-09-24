@@ -107,6 +107,22 @@ const startup = initializeApplication()
 
 `greeting` was referenced before the custom transform and became unused afterward, so it can be removed. `startup` was already unused, so it is preserved along with its potentially side-effectful initializer.
 
+### Reuse scopes from an earlier traversal
+
+If a read-only Babel traversal has already initialized scopes, pass
+`{ scopeIsFresh: true }` to avoid rebuilding them during reference collection:
+
+```ts
+traverse(ast, {
+  // Inspect the AST without changing it.
+})
+const referenced = findReferencedIdentifiers(ast, { scopeIsFresh: true })
+```
+
+Only use this option when the AST has not changed since that traversal. Omit it
+after arbitrary AST mutations so the collector refreshes binding information.
+`deadCodeElimination` always refreshes scopes after transformations.
+
 ## Prior art
 
 Credit to [Jason Miller](https://github.com/developit) for the initial implementation.
