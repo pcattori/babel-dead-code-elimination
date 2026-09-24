@@ -18,6 +18,7 @@ import {
 } from "./scope"
 import findRemovableBindings, {
   getDeclaredBinding,
+  hasDefinitionSideEffects,
   isLoopIteratorBinding,
   isReferenced,
 } from "./find-removable-bindings"
@@ -208,7 +209,11 @@ export default function (
     }
     if (path.isClassDeclaration()) {
       let id = path.get("id")
-      if (id.isIdentifier() && shouldBeRemoved(id)) {
+      if (
+        id.isIdentifier() &&
+        shouldBeRemoved(id) &&
+        !hasDefinitionSideEffects(path)
+      ) {
         willRemove()
         path.remove()
       }

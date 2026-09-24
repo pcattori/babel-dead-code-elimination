@@ -203,9 +203,12 @@ export default function findRemovableBindings(
 // TypeScript enum) is kept and keeps everything it references alive.
 function isRemovableDeclaration(binding: Binding): boolean {
   switch (binding.path.type) {
+    case "ClassDeclaration":
+      return !hasDefinitionSideEffects(
+        binding.path as NodePath<Babel.ClassDeclaration>,
+      )
     case "VariableDeclarator":
     case "FunctionDeclaration":
-    case "ClassDeclaration":
     case "ImportSpecifier":
     case "ImportDefaultSpecifier":
     case "ImportNamespaceSpecifier":
@@ -245,6 +248,48 @@ export function isReferenced(binding: Binding): boolean {
     binding.referencePaths.some((path) => !isTypeOnlyReference(path))
   )
 }
+
+/**
+ * Whether defining the class runs code whose effects removal would drop:
+ * decorators (which commonly register the class), static blocks, impure
+ * static initializers or computed keys, or an `extends` clause other than a
+ * (dotted) name.
+ */
+export function hasDefinitionSideEffects(
+  path: NodePath<Babel.ClassDeclaration>,
+): boolean {
+  const { node, scope } = path
+  if (node.decorators?.length) return true
+  if (node.superClass && !isName(node.superClass)) return true
+  for (const member of node.body.body) {
+    if (t.isStaticBlock(member)) return true
+    if ("decorators" in member && member.decorators?.length) return true
+    if ("computed" in member && member.computed && !scope.isPure(member.key)) {
+      return true
+    }
+    if (
+      (t.isClassProperty(member) ||
+        t.isClassPrivateProperty(member) ||
+        t.isClassAccessorProperty(member)) &&
+      member.static &&
+      member.value &&
+      !scope.isPure(member.value)
+    ) {
+      return true
+    }
+    if (
+      (t.isClassMethod(member) || t.isTSDeclareMethod(member)) &&
+      member.params.some((param) => param.decorators?.length)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+const isName = (node: Babel.Node): boolean =>
+  t.isIdentifier(node) ||
+  (t.isMemberExpression(node) && !node.computed && isName(node.object))
 
 /** Resolves the binding that a declaration's identifier declares. */
 export function getDeclaredBinding(

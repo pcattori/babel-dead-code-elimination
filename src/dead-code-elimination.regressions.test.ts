@@ -24,7 +24,9 @@ type Options = {
 let parseModule = (code: string, typescript = false) =>
   parse(code, {
     sourceType: "module",
-    plugins: typescript ? ["typescript", "jsx"] : [],
+    plugins: typescript
+      ? ["typescript", "jsx", "decorators-legacy"]
+      : ["decorators-legacy"],
   })
 
 let stripExports = (ast: Babel.File, names: string[]) => {
@@ -422,4 +424,47 @@ describe("missed eliminations", () => {
       expect(output).not.toContain(leakedModule)
     },
   )
+})
+
+describe("definition side effects", () => {
+  test.each([
+    [
+      "class decorator",
+      "@customElement('x-foo') class XFoo extends LitElement {}",
+      false,
+    ],
+    ["member decorator", "class User { @Column() name = '' }", false],
+    [
+      "parameter decorator",
+      "class Service { constructor(@Inject(Token) dep: Dep) {} }",
+      true,
+    ],
+    ["static block", "class Setup { static { init() } }", false],
+    [
+      "static initializer",
+      "class Config { static instance = createConfig() }",
+      false,
+    ],
+    ["computed key", "class Keyed { [computeKey()]() {} }", false],
+    ["extends call", "class Logged extends withLogging(Base) {}", false],
+  ])(
+    "keeps an unused class whose definition has effects (%s)",
+    (_, declaration, typescript) => {
+      let source = `${declaration}\nexport const x = 1`
+      let output = transform(source, { candidates: "none", typescript })
+      expect(output).toBe(unchanged(source, typescript))
+    },
+  )
+
+  test("removes an unused class without definition effects", () => {
+    let source = ts`
+      class NotFound extends Error {
+        static displayName = "NotFound";
+        [Symbol.iterator]() {}
+      }
+      export const x = 1
+    `
+    let output = transform(source, { candidates: "none" })
+    expect(output).toBe(unchanged("export const x = 1"))
+  })
 })
