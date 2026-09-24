@@ -1,5 +1,4 @@
 import {
-  traverse,
   t,
   type NodePath,
   type Babel,
@@ -7,6 +6,7 @@ import {
   type Binding,
 } from "./babel-esm"
 import * as Pattern from "./pattern"
+import { forEachMatchingPath, getProgramPath } from "./walk"
 import { unexpected } from "./errors"
 import {
   crawlProgram,
@@ -21,6 +21,15 @@ import findRemovableBindings, {
   isLoopIteratorBinding,
   isReferenced,
 } from "./find-removable-bindings"
+
+const ELIMINATION_TYPES = new Set([
+  "ImportDeclaration",
+  "VariableDeclarator",
+  "ObjectPattern",
+  "ArrayPattern",
+  "FunctionDeclaration",
+  "ClassDeclaration",
+])
 
 /**
  * @param candidates - If provided, only these identifiers will be candidates for dead code elimination.
@@ -207,37 +216,30 @@ export default function (
     }
   }
 
-  const collect = (path: NodePath): void => {
-    paths.push(path)
-    visit(path)
-  }
-
   const crawl = mustCrawlProgram(ast)
-  traverse(ast, {
-    Program(path) {
-      programPath = path
-      if (crawl) crawlProgram(path)
-      removableBindings = findRemovableBindings(path, isKept)
-    },
-    ImportDeclaration: collect,
-    VariableDeclarator: collect,
-    ObjectPattern: collect,
-    ArrayPattern: collect,
-    FunctionDeclaration: collect,
-    ClassDeclaration: collect,
-  })
+  programPath = getProgramPath(ast)
+  if (crawl) crawlProgram(programPath)
+  removableBindings = findRemovableBindings(programPath, isKept)
+  // Collect the declaration and pattern paths in source order without a Babel
+  // traversal (see walk.ts).
+  forEachMatchingPath(
+    programPath,
+    (node) => ELIMINATION_TYPES.has(node.type),
+    (path) => paths.push(path),
+  )
 
-  // Elimination only removes nodes. Revisit the original declaration paths in
-  // source order, without traversing unchanged expressions on every iteration,
-  // and update the bindings instead of crawling the program again.
-  while (needsAnotherPass) {
-    needsAnotherPass = false
-    refreshBindings(snapshot!)
-    removableBindings = findRemovableBindings(programPath, isKept)
+  // Elimination only removes nodes. Revisit the declaration paths in source
+  // order, without traversing unchanged expressions on every pass, and update
+  // the bindings instead of crawling the program again.
+  for (;;) {
     for (const path of paths) {
       if (isAttached(path)) {
         visit(path)
       }
     }
+    if (!needsAnotherPass) break
+    needsAnotherPass = false
+    refreshBindings(snapshot!)
+    removableBindings = findRemovableBindings(programPath, isKept)
   }
 }
