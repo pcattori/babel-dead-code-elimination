@@ -1,8 +1,12 @@
 import { type NodePath, type Babel, type Binding } from "./babel-esm"
 
-/** Finds bindings forming closed SCCs with no external references. */
+/**
+ * Finds bindings forming closed SCCs with no external references.
+ * @param isKept - Bindings that elimination keeps regardless of references.
+ */
 export default function findRemovableBindings(
   programPath: NodePath<Babel.Program>,
+  isKept?: (binding: Binding) => boolean,
 ): Set<Binding> {
   const allBindings = Object.values(programPath.scope.bindings)
   const n = allBindings.length
@@ -24,7 +28,7 @@ export default function findRemovableBindings(
     refs[i] = null
   }
 
-  // Mark bindings as excluded (not removable) if they have external refs, reassignments, or are loop iterators
+  // Mark bindings as excluded (not removable) if they have external refs, reassignments, are loop iterators, or are kept
   const excluded = new Uint8Array(n)
   // excluded bindings whose refs need to be excluded too
   const exclusionQueue: number[] = []
@@ -36,7 +40,8 @@ export default function findRemovableBindings(
 
     if (
       binding.constantViolations.length > 0 ||
-      isLoopIteratorBinding(binding)
+      isLoopIteratorBinding(binding) ||
+      isKept?.(binding)
     ) {
       excluded[i] = 1
       candidateCount--

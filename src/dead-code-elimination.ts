@@ -27,6 +27,14 @@ export default function (
   let removableBindings: Set<Binding>
 
   const hasCandidates = candidates !== undefined
+  // Elimination keeps bindings outside the candidate set, so they must keep
+  // everything they reference alive, including members of reference cycles.
+  let isKept: ((binding: Binding) => boolean) | undefined
+  if (hasCandidates) {
+    const candidateNodes = new Set<Babel.Node>()
+    for (const candidate of candidates) candidateNodes.add(candidate.node)
+    isKept = (binding) => !candidateNodes.has(binding.identifier)
+  }
   const shouldBeRemoved = (ident: NodePath<Babel.Identifier>): boolean => {
     if (hasCandidates && !candidates.has(ident)) return false
 
@@ -172,7 +180,7 @@ export default function (
     Program(path) {
       programPath = path
       path.scope.crawl()
-      removableBindings = findRemovableBindings(path)
+      removableBindings = findRemovableBindings(path, isKept)
     },
     ImportDeclaration: collect,
     VariableDeclarator: collect,
@@ -186,7 +194,7 @@ export default function (
   while (needsAnotherPass) {
     needsAnotherPass = false
     programPath.scope.crawl()
-    removableBindings = findRemovableBindings(programPath)
+    removableBindings = findRemovableBindings(programPath, isKept)
     for (const path of paths) {
       if (isAttached(path)) {
         visit(path)
