@@ -19,10 +19,12 @@ export default function (
   ast: ParseResult<Babel.File>,
   candidates?: Set<NodePath<Babel.Identifier>>,
 ) {
-  let needsAnotherPass: boolean
+  let needsAnotherPass = false
+  let programPath!: NodePath<Babel.Program>
+  const paths: Array<NodePath> = []
 
   // Bindings that form closed cycles (SCCs) with no external references
-  let removableBindings = new Set<Binding>()
+  let removableBindings: Set<Binding>
 
   const hasCandidates = candidates !== undefined
   const shouldBeRemoved = (ident: NodePath<Babel.Identifier>): boolean => {
@@ -54,120 +56,170 @@ export default function (
     return true
   }
 
-  do {
-    needsAnotherPass = false
-
-    traverse(ast, {
-      Program(path) {
-        path.scope.crawl()
-        removableBindings = findRemovableBindings(path)
-      },
-      ImportDeclaration(path) {
-        // Imports cannot keep another local declaration alive.
-        if (path.node.specifiers.length === 0) {
-          return
+  const visit = (path: NodePath): void => {
+    if (path.isImportDeclaration()) {
+      // Imports contain no references to other local bindings, so removing
+      // them cannot make another declaration dead or require another pass.
+      if (path.node.specifiers.length === 0) {
+        return
+      }
+      for (let specifier of path.get("specifiers")) {
+        let local = specifier.get("local")
+        if (shouldBeRemoved(local)) {
+          specifier.remove()
         }
-        for (let specifier of path.get("specifiers")) {
-          let local = specifier.get("local")
-          if (shouldBeRemoved(local)) {
-            specifier.remove()
-          }
-        }
-        if (path.node.specifiers.length === 0) {
+      }
+      if (path.node.specifiers.length === 0) {
+        path.remove()
+      }
+      return
+    }
+    if (path.isVariableDeclarator()) {
+      let id = path.get("id")
+      if (id.isIdentifier()) {
+        if (shouldBeRemoved(id)) {
           path.remove()
+          needsAnotherPass = true
         }
-      },
-      VariableDeclarator(path) {
-        let id = path.get("id")
-        if (id.isIdentifier()) {
-          if (shouldBeRemoved(id)) {
-            path.remove()
+      } else if (id.isObjectPattern() || id.isArrayPattern()) {
+        for (let variable of Pattern.findVariables(id)) {
+          if (!shouldBeRemoved(variable)) continue
+
+          let parent = variable.parentPath
+
+          if (parent.isObjectProperty()) {
+            parent.remove()
             needsAnotherPass = true
+            continue
           }
-        } else if (id.isObjectPattern() || id.isArrayPattern()) {
-          for (let variable of Pattern.findVariables(id)) {
-            if (!shouldBeRemoved(variable)) continue
 
-            let parent = variable.parentPath
+          if (parent.isArrayPattern()) {
+            parent.node.elements[variable.key as number] = null
+            needsAnotherPass = true
+            continue
+          }
 
-            if (parent.isObjectProperty()) {
-              parent.remove()
+          if (parent.isAssignmentPattern()) {
+            if (t.isObjectProperty(parent.parent)) {
+              parent.parentPath?.remove()
               needsAnotherPass = true
               continue
             }
-
-            if (parent.isArrayPattern()) {
-              parent.node.elements[variable.key as number] = null
+            if (t.isArrayPattern(parent.parent)) {
+              parent.parent.elements[parent.key as number] = null
               needsAnotherPass = true
               continue
             }
-
-            if (parent.isAssignmentPattern()) {
-              if (t.isObjectProperty(parent.parent)) {
-                parent.parentPath?.remove()
-                needsAnotherPass = true
-                continue
-              }
-              if (t.isArrayPattern(parent.parent)) {
-                parent.parent.elements[parent.key as number] = null
-                needsAnotherPass = true
-                continue
-              }
-              throw unexpected(parent)
-            }
-
-            if (parent.isRestElement()) {
-              parent.remove()
-              needsAnotherPass = true
-              continue
-            }
-
             throw unexpected(parent)
           }
-        }
-      },
-      ObjectPattern(path) {
-        if (path.node.properties.length !== 0) {
-          return
-        }
-        let isWithinDeclarator =
-          path.find((p) => p.isVariableDeclarator()) !== null
-        let isFunctionParam =
-          path.parentPath.isFunction() &&
-          path.parentPath.node.params.includes(path.node)
-        if (isWithinDeclarator && !isFunctionParam) {
-          Pattern.remove(path)
-          needsAnotherPass = true
-        }
-      },
-      ArrayPattern(path) {
-        if (!path.node.elements.every((e) => e === null)) {
-          return
-        }
-        let isWithinDeclarator =
-          path.find((p) => p.isVariableDeclarator()) !== null
-        let isFunctionParam =
-          path.parentPath.isFunction() &&
-          path.parentPath.node.params.includes(path.node)
-        if (isWithinDeclarator && !isFunctionParam) {
-          Pattern.remove(path)
-          needsAnotherPass = true
-        }
-      },
-      FunctionDeclaration(path) {
-        let id = path.get("id")
-        if (id.isIdentifier() && shouldBeRemoved(id)) {
-          needsAnotherPass = true
-          if (
-            t.isAssignmentExpression(path.parentPath.node) ||
-            t.isVariableDeclarator(path.parentPath.node)
-          ) {
-            path.parentPath.remove()
-          } else {
-            path.remove()
+
+          if (parent.isRestElement()) {
+            parent.remove()
+            needsAnotherPass = true
+            continue
           }
+
+          throw unexpected(parent)
         }
-      },
-    })
-  } while (needsAnotherPass)
+      }
+      return
+    }
+    if (path.isObjectPattern()) {
+      if (path.node.properties.length !== 0) {
+        return
+      }
+      let isWithinDeclarator =
+        path.find((p) => p.isVariableDeclarator()) !== null
+      let isFunctionParam =
+        path.parentPath.isFunction() &&
+        path.parentPath.node.params.includes(path.node)
+      if (isWithinDeclarator && !isFunctionParam) {
+        Pattern.remove(path)
+        needsAnotherPass = true
+      }
+      return
+    }
+    if (path.isArrayPattern()) {
+      if (!path.node.elements.every((element) => element === null)) {
+        return
+      }
+      let isWithinDeclarator =
+        path.find((p) => p.isVariableDeclarator()) !== null
+      let isFunctionParam =
+        path.parentPath.isFunction() &&
+        path.parentPath.node.params.includes(path.node)
+      if (isWithinDeclarator && !isFunctionParam) {
+        Pattern.remove(path)
+        needsAnotherPass = true
+      }
+      return
+    }
+    if (path.isFunctionDeclaration()) {
+      let id = path.get("id")
+      if (id.isIdentifier() && shouldBeRemoved(id)) {
+        needsAnotherPass = true
+        if (
+          t.isAssignmentExpression(path.parentPath.node) ||
+          t.isVariableDeclarator(path.parentPath.node)
+        ) {
+          path.parentPath.remove()
+        } else {
+          path.remove()
+        }
+      }
+      return
+    }
+  }
+
+  const collect = (path: NodePath): void => {
+    paths.push(path)
+    visit(path)
+  }
+
+  traverse(ast, {
+    Program(path) {
+      programPath = path
+      path.scope.crawl()
+      removableBindings = findRemovableBindings(path)
+    },
+    ImportDeclaration: collect,
+    VariableDeclarator: collect,
+    ObjectPattern: collect,
+    ArrayPattern: collect,
+    FunctionDeclaration: collect,
+  })
+
+  // Elimination only removes nodes. Revisit the original declaration paths in
+  // source order, without traversing unchanged expressions on every iteration.
+  while (needsAnotherPass) {
+    needsAnotherPass = false
+    programPath.scope.crawl()
+    removableBindings = findRemovableBindings(programPath)
+    for (const path of paths) {
+      if (isAttached(path)) {
+        visit(path)
+      }
+    }
+  }
+}
+
+// Babel removal clears the removed path, not its descendants. Pattern cleanup
+// also writes array holes directly. These are the only structural edits above.
+function isAttached(path: NodePath): boolean {
+  for (
+    let current: NodePath | null = path;
+    current;
+    current = current.parentPath
+  ) {
+    if (!current.node) {
+      return false
+    }
+    if (
+      Array.isArray(current.container) &&
+      current.container[current.key as number] !== current.node
+    ) {
+      return false
+    }
+  }
+  return true
 }

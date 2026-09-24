@@ -101,3 +101,24 @@ small median differences do not establish a general speedup.
 | empty-nested-pattern-cleanup  | dce      |       38.997 (37.268–41.583) |       39.003 (35.188–45.338) |      +0.01% |
 | no-pattern-no-removal-control | dce      |   939.875 (915.318–1002.865) |    946.206 (911.810–979.857) |      +0.67% |
 | live-patterns-end-to-end      | pipeline | 8266.367 (8172.148–8384.055) | 8243.539 (8130.651–8306.510) |      -0.28% |
+
+## 05-replay: Replay declaration paths
+
+After the first elimination traversal, replay the declaration/pattern paths in
+source order. Scopes and cycle membership are still refreshed after non-import
+removal. Expressions no longer need another full traversal. The guard checks
+removed ancestors and direct array-hole writes, the only structural mutations
+performed by DCE. It does not use reflection or general-purpose resynchronization.
+Replay retains O(visited declaration/pattern paths) references until DCE returns;
+there is no cross-call cache. The no-removal control ranges overlap.
+
+| Workload                          | Phase    |                 Before µs (IQR) |                  After µs (IQR) | Time change |
+| --------------------------------- | -------- | ------------------------------: | ------------------------------: | ----------: |
+| one-dead-schema-80-live-functions | dce      |    4170.451 (4128.055–4243.807) |    3562.930 (3531.193–3676.409) |     -14.57% |
+| 24-link-cascade                   | dce      |    1168.414 (1158.599–1247.253) |       874.133 (865.529–880.562) |     -25.19% |
+| nested-pattern-removed-subtrees   | dce      |       729.581 (721.273–737.398) |       660.130 (640.969–695.984) |      -9.52% |
+| no-removal-control                | dce      |    2373.380 (2365.469–2402.424) |    2423.523 (2366.909–2491.633) |      +2.11% |
+| empty-array-parameter-control     | dce      |          24.914 (24.076–26.664) |          20.151 (19.734–20.797) |     -19.12% |
+| tiny-removal-control              | dce      |          26.307 (23.143–27.164) |          19.870 (17.549–20.963) |     -24.47% |
+| schema-80-end-to-end              | pipeline | 11473.448 (11359.482–11511.552) | 10735.862 (10659.930–10929.878) |      -6.43% |
+| 24-link-cascade-end-to-end        | pipeline |    2265.888 (2201.336–2301.091) |    2007.469 (1939.810–2017.352) |     -11.40% |
