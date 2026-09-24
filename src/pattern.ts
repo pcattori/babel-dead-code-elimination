@@ -86,7 +86,9 @@ export function findDeclarator(
   let parent: NodePath | null = path.parentPath
   while (parent) {
     if (parent.isVariableDeclarator()) {
-      return child.key === "id" ? parent : null
+      // A for-in/of head needs its declaration: `for (const {} of items)`.
+      let isLoopHead = parent.parentPath.key === "left"
+      return child.key === "id" && !isLoopHead ? parent : null
     }
     let isPatternLink =
       (parent.isObjectProperty() && child.key === "value") ||
