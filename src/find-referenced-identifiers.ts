@@ -56,6 +56,12 @@ function declarationVisitor(
         identifier(id)
       }
     },
+    ClassDeclaration(path) {
+      const id = path.get("id")
+      if (id.isIdentifier()) {
+        identifier(id)
+      }
+    },
   }
 }
 

@@ -191,12 +191,13 @@ export default function findRemovableBindings(
   return removable
 }
 
-// Elimination only removes these declarations. Any other binding (a class, a
-// TypeScript enum, ...) is kept and keeps everything it references alive.
+// Elimination only removes these declarations. Any other binding (such as a
+// TypeScript enum) is kept and keeps everything it references alive.
 function isRemovableDeclaration(binding: Binding): boolean {
   switch (binding.path.type) {
     case "VariableDeclarator":
     case "FunctionDeclaration":
+    case "ClassDeclaration":
     case "ImportSpecifier":
     case "ImportDefaultSpecifier":
     case "ImportNamespaceSpecifier":

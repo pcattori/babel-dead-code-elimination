@@ -171,6 +171,14 @@ export default function (
       }
       return
     }
+    if (path.isClassDeclaration()) {
+      let id = path.get("id")
+      if (id.isIdentifier() && shouldBeRemoved(id)) {
+        needsAnotherPass = true
+        path.remove()
+      }
+      return
+    }
   }
 
   const collect = (path: NodePath): void => {
@@ -189,6 +197,7 @@ export default function (
     ObjectPattern: collect,
     ArrayPattern: collect,
     FunctionDeclaration: collect,
+    ClassDeclaration: collect,
   })
 
   // Elimination only removes nodes. Revisit the original declaration paths in
