@@ -2,6 +2,7 @@ import { runInNewContext } from "node:vm"
 import { describe, expect, test } from "vitest"
 import { parse } from "@babel/parser"
 import generate from "@babel/generator"
+import { t } from "./babel-esm"
 import deadCodeElimination from "./dead-code-elimination"
 
 const fixtures = [
@@ -36,6 +37,7 @@ const fixtures = [
     }`,
     expression: "keep()",
     expected: 42,
+    declarations: ["[used,, last]"],
   },
   {
     name: "nested object patterns become empty after child cleanup",
@@ -46,6 +48,7 @@ const fixtures = [
     }`,
     expression: "keep()",
     expected: 42,
+    declarations: ["{ used }"],
   },
   {
     name: "object rest preserves excluded keys across iterations",
@@ -100,11 +103,20 @@ const fixtures = [
 describe("declaration replay", () => {
   test.each(fixtures)(
     "$name",
-    ({ code, expression, expected, emptyCandidates }) => {
+    ({ code, expression, expected, emptyCandidates, declarations }) => {
       const ast = parse(code, { sourceType: "module" })
       deadCodeElimination(ast, emptyCandidates ? new Set() : undefined)
       const output = generate(ast).code.replace(/\bexport /g, "")
       expect(runInNewContext(`${output}\n${expression}`)).toEqual(expected)
+      if (declarations) {
+        const ids: string[] = []
+        t.traverseFast(ast, (node) => {
+          if (t.isVariableDeclarator(node)) {
+            ids.push(generate(node.id, { compact: true }).code)
+          }
+        })
+        expect(ids).toEqual(declarations.map((id) => id.replace(/\s+/g, "")))
+      }
     },
   )
 })
