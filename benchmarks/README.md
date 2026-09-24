@@ -122,3 +122,27 @@ there is no cross-call cache. The no-removal control ranges overlap.
 | tiny-removal-control              | dce      |          26.307 (23.143–27.164) |          19.870 (17.549–20.963) |     -24.47% |
 | schema-80-end-to-end              | pipeline | 11473.448 (11359.482–11511.552) | 10735.862 (10659.930–10929.878) |      -6.43% |
 | 24-link-cascade-end-to-end        | pipeline |    2265.888 (2201.336–2301.091) |    2007.469 (1939.810–2017.352) |     -11.40% |
+
+## 06-collector: Share analysis and reference collection
+
+The opt-in collector combines a complete read-only analysis visitor with
+collection of declaration paths, then defers graph/reference membership until
+requested. The returned reader must run before AST or binding mutation. Default
+scope refresh runs before generic and typed Program callbacks, including when a
+visitor object is reused. The existing eager API still streams identifiers.
+Accepted transforms benefit, but discarded matches allocate/retain declaration
+paths unnecessarily. That cost is measured below; the API is not an unconditional
+replacement for an analysis-only traversal. The reader retains its paths until
+the caller discards it, with no global cache.
+
+| Workload                           | Phase      |              Before µs (IQR) |               After µs (IQR) | Time change |
+| ---------------------------------- | ---------- | ---------------------------: | ---------------------------: | ----------: |
+| accepted-schema-16                 | analysis   |    272.276 (265.871–276.392) |    161.719 (157.677–168.423) |     -40.60% |
+| accepted-schema-80                 | analysis   | 1836.242 (1791.805–1852.463) | 1204.432 (1132.958–1208.721) |     -34.41% |
+| discarded-validator-calls-200      | analysis   |    470.953 (454.703–480.990) |    494.315 (491.435–497.591) |      +4.96% |
+| discarded-validator-references-200 | analysis   |    333.391 (328.450–342.682) |    373.643 (363.185–375.716) |     +12.07% |
+| tiny-accepted                      | analysis   |          7.703 (7.672–7.992) |          7.401 (7.120–7.999) |      -3.93% |
+| default-collector-refresh          | analysis   |    532.522 (514.168–548.243) |    407.318 (406.880–453.967) |     -23.51% |
+| default-api-control                | references |    917.508 (912.599–942.802) |    915.818 (905.378–923.013) |      -0.18% |
+| schema-80-end-to-end               | pipeline   | 9542.250 (9476.971–9666.201) | 8994.841 (8949.544–9094.828) |      -5.74% |
+| discarded-200-end-to-end           | pipeline   | 3928.060 (3917.099–4059.953) | 4057.328 (4028.185–4084.271) |      +3.29% |
