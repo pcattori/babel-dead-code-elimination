@@ -163,18 +163,13 @@ export default function findRemovableBindings(
   const removable = new Set<Binding>()
 
   for (let compId = 0; compId < sccs.length; compId++) {
+    // Removable only if no binding outside the SCC references it. The
+    // referencing binding may be one that elimination keeps.
+    if (hasIncoming[compId]) continue
     const comp = sccs[compId]!
-    // SCC with one binding: only removable if it references itself (e.g. recursive fn)
-    if (comp.length === 1) {
-      const idx = comp[0]!
-      if (refs[idx]?.includes(idx)) removable.add(allBindings[idx]!)
-      continue
-    }
-
-    // SCC with multiple bindings: removable if no binding outside the SCC references it
-    if (!hasIncoming[compId]) {
-      for (const idx of comp) removable.add(allBindings[idx]!)
-    }
+    // SCC with one binding: only a cycle if it references itself (e.g. recursive fn)
+    if (comp.length === 1 && !refs[comp[0]!]?.includes(comp[0]!)) continue
+    for (const idx of comp) removable.add(allBindings[idx]!)
   }
 
   return removable
