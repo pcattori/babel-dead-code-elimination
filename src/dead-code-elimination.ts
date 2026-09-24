@@ -8,7 +8,7 @@ import {
 } from "./babel-esm"
 import * as Pattern from "./pattern"
 import { unexpected } from "./errors"
-import { crawlProgram } from "./scope"
+import { crawlProgram, mustCrawlProgram } from "./scope"
 import findRemovableBindings, {
   getDeclaredBinding,
   isLoopIteratorBinding,
@@ -196,10 +196,11 @@ export default function (
     visit(path)
   }
 
+  const crawl = mustCrawlProgram(ast)
   traverse(ast, {
     Program(path) {
       programPath = path
-      crawlProgram(path)
+      if (crawl) crawlProgram(path)
       removableBindings = findRemovableBindings(path, isKept)
     },
     ImportDeclaration: collect,

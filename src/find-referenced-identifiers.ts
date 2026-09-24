@@ -7,7 +7,7 @@ import {
 } from "./babel-esm"
 import type { Visitor } from "@babel/traverse"
 import * as Pattern from "./pattern"
-import { crawlProgram } from "./scope"
+import { crawlProgram, mustCrawlProgram } from "./scope"
 import findRemovableBindings, {
   getDeclaredBinding,
   isReferenced,
@@ -72,11 +72,12 @@ export default function (
 ): Set<IdentifierPath> {
   const referenced = new Set<IdentifierPath>()
   let removable: Set<Binding>
+  const crawl = !options?.scopeIsFresh && mustCrawlProgram(ast)
   traverse(
     ast,
     declarationVisitor(
       (path) => {
-        if (!options?.scopeIsFresh) {
+        if (crawl) {
           crawlProgram(path)
         }
         removable = findRemovableBindings(path)
@@ -106,7 +107,7 @@ export function collectReferencedIdentifiers(
     },
     (ident) => identifiers.push(ident),
   )
-  if (!options.scopeIsFresh) {
+  if (!options.scopeIsFresh && mustCrawlProgram(ast)) {
     visitor.enter = (path) => {
       // File traversal starts at Program. Restore the supplied generic callbacks
       // for subsequent nodes without changing the currently iterated callback list.

@@ -7,9 +7,25 @@ import { traverse, t, type NodePath, type Babel } from "./babel-esm"
  * create fresh nested scopes.
  */
 export function crawlProgram(programPath: NodePath<Babel.Program>): void {
-  const program = programPath.node
+  forgetNestedScopes(programPath.node)
+  programPath.scope.crawl()
+}
+
+/**
+ * Prepares a traversal of `ast` that needs scopes matching the current AST.
+ * Returns whether the traversal must still call crawlProgram. When Babel has
+ * no Program scope cached, the traversal creates one and Babel crawls it on
+ * creation, so a second crawl would repeat identical work. Nested scopes are
+ * forgotten first so that this crawl rebuilds them, too.
+ */
+export function mustCrawlProgram(ast: Babel.File): boolean {
+  if (traverse.cache.scope.has(ast.program)) return true
+  forgetNestedScopes(ast.program)
+  return false
+}
+
+function forgetNestedScopes(program: Babel.Program): void {
   t.traverseFast(program, (node) => {
     if (node !== program) traverse.cache.scope.delete(node)
   })
-  programPath.scope.crawl()
 }
