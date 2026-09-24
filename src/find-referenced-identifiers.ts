@@ -6,9 +6,9 @@ import {
   type Binding,
 } from "./babel-esm"
 import type { Visitor } from "@babel/traverse"
-import * as Pattern from "./pattern"
 import { crawlProgram, mustCrawlProgram } from "./scope"
 import { forEachMatchingPath, getProgramPath } from "./walk"
+import { DECLARATION_TYPES, forEachDeclaredIdentifier } from "./declarations"
 import findRemovableBindings, {
   getDeclaredBinding,
   isReferenced,
@@ -28,39 +28,6 @@ function addIfReferenced(
   const binding = getDeclaredBinding(ident)
   if (binding && !removable.has(binding) && isReferenced(binding)) {
     referenced.add(ident)
-  }
-}
-
-const DECLARATION_TYPES = new Set([
-  "ImportDeclaration",
-  "VariableDeclarator",
-  "FunctionDeclaration",
-  "ClassDeclaration",
-])
-
-/** Calls `identifier` for each identifier that a declaration path declares. */
-function forEachDeclaredIdentifier(
-  path: NodePath,
-  identifier: (path: IdentifierPath) => void,
-): void {
-  if (path.isImportDeclaration()) {
-    for (const specifier of path.get("specifiers")) {
-      identifier(specifier.get("local"))
-    }
-  } else if (path.isVariableDeclarator()) {
-    const id = path.get("id")
-    if (id.isIdentifier()) {
-      identifier(id)
-    } else if (id.isObjectPattern() || id.isArrayPattern()) {
-      for (const variable of Pattern.findVariables(id)) {
-        identifier(variable)
-      }
-    }
-  } else if (path.isFunctionDeclaration() || path.isClassDeclaration()) {
-    const id = path.get("id") as NodePath
-    if (id.isIdentifier()) {
-      identifier(id)
-    }
   }
 }
 

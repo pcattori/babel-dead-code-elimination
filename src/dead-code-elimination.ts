@@ -8,7 +8,14 @@ import {
 } from "./babel-esm"
 import * as Pattern from "./pattern"
 import { unexpected } from "./errors"
-import { crawlProgram, mustCrawlProgram } from "./scope"
+import {
+  crawlProgram,
+  isAttached,
+  mustCrawlProgram,
+  refreshBindings,
+  snapshotBindings,
+  type BindingSnapshot,
+} from "./scope"
 import findRemovableBindings, {
   getDeclaredBinding,
   isLoopIteratorBinding,
@@ -28,6 +35,7 @@ export default function (
 
   // Bindings that form closed cycles (SCCs) with no external references
   let removableBindings: Set<Binding>
+  let snapshot: BindingSnapshot | undefined
 
   const hasCandidates = candidates !== undefined
   // Elimination keeps bindings outside the candidate set, so they must keep
@@ -63,6 +71,14 @@ export default function (
     return true
   }
 
+  // Call before removing anything but imports. Such a removal can make other
+  // declarations unused, so another pass follows, and it can make Babel drop
+  // unrelated bindings by name, so bindings are recorded before the first one.
+  const willRemove = (): void => {
+    needsAnotherPass = true
+    snapshot ??= snapshotBindings(programPath)
+  }
+
   const visit = (path: NodePath): void => {
     if (path.isImportDeclaration()) {
       // Imports contain no references to other local bindings, so removing
@@ -85,8 +101,8 @@ export default function (
       let id = path.get("id")
       if (id.isIdentifier()) {
         if (shouldBeRemoved(id)) {
+          willRemove()
           path.remove()
-          needsAnotherPass = true
         }
       } else if (id.isObjectPattern() || id.isArrayPattern()) {
         for (let variable of Pattern.findVariables(id)) {
@@ -100,34 +116,34 @@ export default function (
           let parent = variable.parentPath
 
           if (parent.isObjectProperty()) {
+            willRemove()
             parent.remove()
-            needsAnotherPass = true
             continue
           }
 
           if (parent.isArrayPattern()) {
+            willRemove()
             parent.node.elements[variable.key as number] = null
-            needsAnotherPass = true
             continue
           }
 
           if (parent.isAssignmentPattern()) {
             if (t.isObjectProperty(parent.parent)) {
+              willRemove()
               parent.parentPath?.remove()
-              needsAnotherPass = true
               continue
             }
             if (t.isArrayPattern(parent.parent)) {
+              willRemove()
               parent.parent.elements[parent.key as number] = null
-              needsAnotherPass = true
               continue
             }
             throw unexpected(parent)
           }
 
           if (parent.isRestElement()) {
+            willRemove()
             parent.remove()
-            needsAnotherPass = true
             continue
           }
 
@@ -145,8 +161,8 @@ export default function (
         declarator &&
         !Pattern.isRestFiltered(declarator.node.id, path.node)
       ) {
+        willRemove()
         Pattern.remove(path)
-        needsAnotherPass = true
       }
       return
     }
@@ -159,14 +175,15 @@ export default function (
         declarator &&
         !Pattern.isRestFiltered(declarator.node.id, path.node)
       ) {
+        willRemove()
         Pattern.remove(path)
-        needsAnotherPass = true
       }
       return
     }
     if (path.isFunctionDeclaration()) {
       let id = path.get("id")
       if (id.isIdentifier() && shouldBeRemoved(id)) {
+        willRemove()
         // TypeScript overload signatures cannot outlive their implementation.
         for (let sibling of path.getAllPrevSiblings()) {
           if (
@@ -176,7 +193,6 @@ export default function (
             sibling.remove()
           }
         }
-        needsAnotherPass = true
         path.remove()
       }
       return
@@ -184,7 +200,7 @@ export default function (
     if (path.isClassDeclaration()) {
       let id = path.get("id")
       if (id.isIdentifier() && shouldBeRemoved(id)) {
-        needsAnotherPass = true
+        willRemove()
         path.remove()
       }
       return
@@ -212,10 +228,11 @@ export default function (
   })
 
   // Elimination only removes nodes. Revisit the original declaration paths in
-  // source order, without traversing unchanged expressions on every iteration.
+  // source order, without traversing unchanged expressions on every iteration,
+  // and update the bindings instead of crawling the program again.
   while (needsAnotherPass) {
     needsAnotherPass = false
-    crawlProgram(programPath)
+    refreshBindings(snapshot!)
     removableBindings = findRemovableBindings(programPath, isKept)
     for (const path of paths) {
       if (isAttached(path)) {
@@ -223,25 +240,4 @@ export default function (
       }
     }
   }
-}
-
-// Babel removal clears the removed path, not its descendants. Pattern cleanup
-// also writes array holes directly. These are the only structural edits above.
-function isAttached(path: NodePath): boolean {
-  for (
-    let current: NodePath | null = path;
-    current;
-    current = current.parentPath
-  ) {
-    if (!current.node) {
-      return false
-    }
-    if (
-      Array.isArray(current.container) &&
-      current.container[current.key as number] !== current.node
-    ) {
-      return false
-    }
-  }
-  return true
 }
