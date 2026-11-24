@@ -217,23 +217,14 @@ describe("variable", () => {
   DECLARATIONS.forEach((decl) => {
     test(`within for...in: ${decl}`, async () => {
       let source = `for (${decl} a in b) {}`
-      expect(await dce(source)).toMatchInlineSnapshot(`
-        "for (${decl} a in b) {
-        }
-        "
-      `)
+expect(await dce(source)).toBe(`for (${decl} a in b) {\n}\n`)
     })
   })
 
   DECLARATIONS.forEach((decl) => {
     test(`within for...of: ${decl}`, async () => {
       let source = `for (${decl} a of b) {}`
-
-      expect(await dce(source)).toMatchInlineSnapshot(`
-        "for (${decl} a of b) {
-        }
-        "
-      `)
+expect(await dce(source)).toBe(`for (${decl} a of b) {\n}\n`)
     })
   })
 

@@ -1,7 +1,8 @@
-import { bench, describe } from "vitest"
+import { describe } from "vitest"
 import { parse } from "@babel/parser"
 import { Babel, traverse, type NodePath } from "../src/babel-esm"
 import findRemovableBindings from "../src/find-removable-bindings"
+import { bench } from "./consuming"
 import { registry } from "./workloads"
 
 // Helper to get program path from source
