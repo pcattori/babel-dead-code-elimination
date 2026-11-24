@@ -25,8 +25,13 @@ export default function (
   let removableBindings = new Set<Binding>()
 
   const hasCandidates = candidates !== undefined
+  // Match candidates by node: Babel 8 creates new paths for nodes that a
+  // transform moved by mutating the AST directly
+  const candidateNodes = new Set(
+    candidates ? [...candidates].map((p) => p.node) : [],
+  )
   const shouldBeRemoved = (ident: NodePath<Babel.Identifier>): boolean => {
-    if (hasCandidates && !candidates.has(ident)) return false
+    if (hasCandidates && !candidateNodes.has(ident.node)) return false
 
     const binding = ident.scope.getBinding(ident.node.name)
 
@@ -50,7 +55,7 @@ export default function (
       return !grandParent.get("properties").at(-1)?.isRestElement()
     }
 
-    if (hasCandidates) return candidates.has(ident)
+    if (hasCandidates) return candidateNodes.has(ident.node)
     return true
   }
 
