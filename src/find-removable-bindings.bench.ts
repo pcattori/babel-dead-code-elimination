@@ -1,7 +1,12 @@
-import { bench, describe } from "vitest"
+import { describe, test } from "vitest"
 import { parse } from "@babel/parser"
 import { Babel, traverse, type NodePath } from "./babel-esm"
 import findRemovableBindings from "./find-removable-bindings"
+
+const bench = (name: string, fn: () => void) =>
+  test(name, async ({ bench }) => {
+    await bench(name, fn).run()
+  })
 
 // Helper to get program path from source
 const getProgramPath = (source: string): NodePath<Babel.Program> => {
