@@ -56,6 +56,18 @@ export default function (
     for (const candidate of candidates) candidateNodes.add(candidate.node)
     isKept = (binding) => !candidateNodes.has(binding.identifier)
   }
+  // Patterns that elimination emptied. With candidates, a pattern that was
+  // empty to begin with (`const {} = init()`) is kept with its initializer.
+  const emptied = new WeakSet<Babel.Node>()
+  const markEmptied = (path: NodePath) => {
+    for (
+      let p = path.parentPath;
+      p && !p.isVariableDeclarator();
+      p = p.parentPath
+    ) {
+      if (p.isObjectPattern() || p.isArrayPattern()) emptied.add(p.node)
+    }
+  }
   const shouldBeRemoved = (ident: NodePath<Babel.Identifier>): boolean => {
     if (hasCandidates && !candidates.has(ident)) return false
 
@@ -123,6 +135,7 @@ export default function (
           if (Pattern.isRestFiltered(id.node, variable.node)) continue
           if (!shouldBeRemoved(variable)) continue
           if (callsInFunction(path)) break
+          markEmptied(variable)
 
           let parent = variable.parentPath
 
@@ -171,9 +184,11 @@ export default function (
       if (
         declarator &&
         !Pattern.isRestFiltered(declarator.node.id, path.node) &&
-        !callsInFunction(declarator)
+        !callsInFunction(declarator) &&
+        (!hasCandidates || emptied.has(path.node))
       ) {
         willRemove()
+        markEmptied(path)
         Pattern.remove(path)
       }
       return
@@ -186,9 +201,11 @@ export default function (
       if (
         declarator &&
         !Pattern.isRestFiltered(declarator.node.id, path.node) &&
-        !callsInFunction(declarator)
+        !callsInFunction(declarator) &&
+        (!hasCandidates || emptied.has(path.node))
       ) {
         willRemove()
+        markEmptied(path)
         Pattern.remove(path)
       }
       return
