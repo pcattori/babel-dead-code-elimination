@@ -97,13 +97,14 @@ test("n=2: one self-ref, one not -> only self-ref removable", () => {
   expect(names).toEqual(["a"])
 })
 
-test("n=2: no cycle between two -> none removable", () => {
+test("n=2: no cycle between two -> callee of dead code removable", () => {
   let source = dedent`
     function a() { return b() }
     function b() { return 1 }
   `
   let names = findRemovableNames(source)
-  expect(names).toEqual([])
+  // only the unreferenced (and so dead) `a` references `b`
+  expect(names).toEqual(["b"])
 })
 
 test("n=3: triangle cycle -> all removable", () => {
@@ -116,17 +117,17 @@ test("n=3: triangle cycle -> all removable", () => {
   expect(names.sort()).toEqual(["a", "b", "c"])
 })
 
-test("n=3: linear chain no cycle -> none removable", () => {
+test("n=3: linear chain no cycle -> everything dead code reaches is removable", () => {
   let source = dedent`
     function a() { return b() }
     function b() { return c() }
     function c() { return 1 }
   `
   let names = findRemovableNames(source)
-  expect(names).toEqual([])
+  expect(names.sort()).toEqual(["b", "c"])
 })
 
-test("n=3: A↔B mutual, A→C (C unused) -> A-B removable", () => {
+test("n=3: A↔B mutual, A→C (C unused) -> A-B-C removable", () => {
   // A and B reference each other, A also calls C, but C is not in cycle
   let source = dedent`
     function a() { b(); c() }
@@ -134,30 +135,29 @@ test("n=3: A↔B mutual, A→C (C unused) -> A-B removable", () => {
     function c() { return 1 }
   `
   let names = findRemovableNames(source)
-  // A-B form closed cycle (no external refs into them)
-  // C is not in a cycle and has incoming from A, so not removable
-  expect(names.sort()).toEqual(["a", "b"])
+  // nothing outside A, B and C references them
+  expect(names.sort()).toEqual(["a", "b", "c"])
 })
 
-test("n=3: A↔B mutual, C→A -> A-B NOT removable", () => {
+test("n=3: A↔B mutual, C→A (C unused) -> A-B removable", () => {
   let source = dedent`
     function a() { return b() }
     function b() { return a() }
     function c() { return a() }
   `
   let names = findRemovableNames(source)
-  // C references A, so A-B has incoming edge -> not removable
-  expect(names).toEqual([])
+  // only the unreferenced (and so dead) C references the cycle
+  expect(names.sort()).toEqual(["a", "b"])
 })
 
-test("n=3: A↔B mutual, C→B (not A) -> A-B NOT removable", () => {
+test("n=3: A↔B mutual, C→B (C unused) -> A-B removable", () => {
   let source = dedent`
     function a() { return b() }
     function b() { return a() }
     function c() { return b() }
   `
   let names = findRemovableNames(source)
-  expect(names).toEqual([])
+  expect(names.sort()).toEqual(["a", "b"])
 })
 
 test("n=3: three independent self-refs -> all removable", () => {
@@ -180,14 +180,14 @@ test("n=3: A→A self, B↔C mutual -> all removable", () => {
   expect(names.sort()).toEqual(["a", "b", "c"])
 })
 
-test("n=3: A→B, B→C, no cycle -> none removable", () => {
+test("n=3: A→B, B→C, no cycle -> B-C removable", () => {
   let source = dedent`
     function a() { return b() }
     function b() { return c() }
     function c() { return 1 }
   `
   let names = findRemovableNames(source)
-  expect(names).toEqual([])
+  expect(names.sort()).toEqual(["b", "c"])
 })
 
 test("n=3: reverse triangle A←B←C←A -> all removable", () => {
@@ -225,17 +225,15 @@ test("n=4: SCC with incoming from external binding -> none removable", () => {
   expect(names).toEqual([])
 })
 
-test("SCC with incoming from another candidate -> not removable", () => {
-  // All three are candidates. c->a means a-b SCC has external incoming
+test("SCC with incoming only from dead code -> removable", () => {
+  // c->a, but c itself is unreferenced, so nothing live reaches a-b
   let source = dedent`
     function a() { return b() }
     function b() { return a() }
     function c() { return a() }
   `
   let names = findRemovableNames(source)
-  // c refs a, so a-b SCC has incoming edge from c (another candidate)
-  // But c itself has no refs, so c is not in a cycle either
-  expect(names).toEqual([])
+  expect(names.sort()).toEqual(["a", "b"])
 })
 
 test("mixed: self-only + cycle + external", () => {

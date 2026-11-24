@@ -43,7 +43,7 @@ export default function (
   let programPath!: NodePath<Babel.Program>
   const paths: Array<NodePath> = []
 
-  // Bindings that form closed cycles (SCCs) with no external references
+  // Bindings that nothing elimination keeps reaches
   let removableBindings: Set<Binding>
   let snapshot: BindingSnapshot | undefined
 
@@ -79,7 +79,7 @@ export default function (
     // binding of an enclosing scope until the next crawl.
     if (binding?.identifier !== ident.node) return false
 
-    // If binding is part of a removable cycle, allow removal
+    // If nothing that elimination keeps reaches the binding, allow removal
     if (removableBindings.has(binding)) return true
 
     if (isReferenced(binding)) return false
