@@ -10,16 +10,22 @@ export default function findRemovableBindings(
   programPath: NodePath<Babel.Program>,
   isKept?: (binding: Binding) => boolean,
 ): Set<Binding> {
-  const graph = buildReferenceGraph(programPath, isKept)
+  const graph = buildReferenceGraph(programPath, isKept, true)
   const removable = new Set<Binding>()
   if (!graph) return removable
   // Every binding left is reachable from nothing that elimination keeps, so it
-  // is dead, whether it forms a cycle or is only referenced by dead code.
-  // Unreferenced ones are removed anyway, so only referenced ones are listed.
+  // is dead, whether it forms a cycle or is only referenced or reassigned by
+  // dead code. Unreferenced ones are removed anyway, so only referenced or
+  // reassigned ones are listed.
   const { bindings, excluded } = graph
   for (let i = 0; i < bindings.length; i++) {
     const binding = bindings[i]!
-    if (!excluded[i] && isReferenced(binding)) removable.add(binding)
+    if (
+      !excluded[i] &&
+      (isReferenced(binding) || binding.constantViolations.length > 0)
+    ) {
+      removable.add(binding)
+    }
   }
   return removable
 }
@@ -132,10 +138,15 @@ export function findDeadCycleBindings(
  * The program's bindings, the references inside each one's declaration, and
  * which bindings are excluded: kept, read from outside every declaration, or
  * reached from such a binding. Undefined when every binding is excluded.
+ * @param followReassignments - Treat a reassignment inside a declaration like
+ * a reference from it, so that it keeps the variable only while the
+ * declaration is kept. Otherwise every reassigned binding is excluded, as
+ * reference collection always did.
  */
 function buildReferenceGraph(
   programPath: NodePath<Babel.Program>,
   isKept?: (binding: Binding) => boolean,
+  followReassignments = false,
 ):
   | { bindings: Binding[]; refs: (number[] | null)[]; excluded: Uint8Array }
   | undefined {
@@ -163,22 +174,46 @@ function buildReferenceGraph(
     refs[i] = null
   }
 
-  // Mark bindings as excluded (not removable) if they have external refs,
+  // Mark bindings as excluded (not removable) if they have external refs or
   // reassignments, or are kept. A program-level loop head is a `var`, whose
-  // loop assignment Babel records as a reassignment.
+  // loop assignment Babel records as a reassignment by its own declarator.
   const excluded = new Uint8Array(n)
   // excluded bindings whose refs need to be excluded too
   const exclusionQueue: number[] = []
   // bindings that might be removable
   let candidateCount = n
 
+  // Adds an edge to `target` from every binding whose declaration contains
+  // `site`. False when no declaration contains it.
+  const addEdges = (site: NodePath, target: number): boolean => {
+    let containers: number[] | undefined
+    for (let path: NodePath | null = site; path; path = path.parentPath) {
+      containers = pathNodeToIdx.get(path.node)
+      if (containers !== undefined) break
+    }
+    if (containers === undefined) return false
+    // Every binding of a declarator keeps its initializer alive.
+    for (const containerIdx of containers) {
+      const containerRefs = refs[containerIdx]
+      if (!containerRefs) {
+        refs[containerIdx] = [target]
+        // Sites of one target are processed together, so any duplicate edge
+        // is the last one appended to its containing declaration.
+      } else if (containerRefs[containerRefs.length - 1] !== target) {
+        containerRefs.push(target)
+      }
+    }
+    return true
+  }
+
   for (let i = 0; i < n; i++) {
     const binding = allBindings[i]!
 
     if (
-      binding.constantViolations.length > 0 ||
       !isRemovableDeclaration(binding) ||
-      isKept?.(binding)
+      isKept?.(binding) ||
+      (binding.constantViolations.length > 0 &&
+        (!followReassignments || isLoopIteratorBinding(binding)))
     ) {
       excluded[i] = 1
       candidateCount--
@@ -186,34 +221,18 @@ function buildReferenceGraph(
       continue
     }
 
-    for (const refPath of binding.referencePaths) {
-      if (isTypeOnlyReference(refPath)) continue
-      // Walk up the AST to find which binding (if any) contains this reference
-      let path: NodePath | null = refPath
-      let containers: number[] | undefined
-      while (path) {
-        containers = pathNodeToIdx.get(path.node)
-        if (containers !== undefined) break
-        path = path.parentPath
-      }
-      if (containers !== undefined) {
-        // Every binding of a declarator keeps its initializer alive.
-        for (const containerIdx of containers) {
-          const containerRefs = refs[containerIdx]
-          if (!containerRefs) {
-            refs[containerIdx] = [i]
-            // References to this target are processed together, so any duplicate
-            // edge is the last one appended to its containing declaration.
-          } else if (containerRefs[containerRefs.length - 1] !== i) {
-            containerRefs.push(i)
-          }
-        }
-      } else {
-        excluded[i] = 1
-        candidateCount--
-        exclusionQueue.push(i)
-        break
-      }
+    // A reassignment, like a reference, keeps the binding alive only while
+    // the declaration that contains it is kept. Only reached when following
+    // reassignments: otherwise a reassigned binding is excluded above.
+    const reachable =
+      binding.constantViolations.every((site) => addEdges(site, i)) &&
+      binding.referencePaths.every(
+        (site) => isTypeOnlyReference(site) || addEdges(site, i),
+      )
+    if (!reachable) {
+      excluded[i] = 1
+      candidateCount--
+      exclusionQueue.push(i)
     }
   }
 

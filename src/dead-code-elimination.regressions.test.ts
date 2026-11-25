@@ -318,6 +318,37 @@ describe("missed eliminations", () => {
     expect(generate(ast).code).toBe("const x = createServerFn().handler();")
   })
 
+  test("removes a variable reassigned only by a function that it reads", () => {
+    let source = ts`
+      import { db } from "./db.server"
+      let cache = memo(() => refresh)
+      function refresh() { cache = db.load() }
+      export const value = 1
+    `
+    expect(transform(source, { candidates: "none" })).toBe(
+      "export const value = 1;",
+    )
+  })
+
+  test("removes a variable reassigned only in its own initializer", () => {
+    let source = ts`
+      let state = init(() => { state = 0 })
+      export const value = 1
+    `
+    expect(transform(source, { candidates: "none" })).toBe(
+      "export const value = 1;",
+    )
+  })
+
+  test("keeps a variable reassigned by a function kept for another reason", () => {
+    let source = ts`
+      let cache = memo(() => refresh)
+      function refresh() { cache = load() }
+      export { refresh }
+    `
+    expect(transform(source, { candidates: "none" })).toBe(unchanged(source))
+  })
+
   test("removes a closed three-function cycle", () => {
     let source = ts`
       function serialize(v) { return Array.isArray(v) ? serializeArray(v) : serializeObject(v) }

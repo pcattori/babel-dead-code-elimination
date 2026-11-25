@@ -292,6 +292,15 @@ test("constant violations mark as external", () => {
   expect(names).toEqual([])
 })
 
+test("a reassignment inside a declaration is an edge from it", () => {
+  let source = dedent`
+    let a = () => b
+    function b() { a = 2 }
+  `
+  let names = findRemovableNames(source)
+  expect(names.sort()).toEqual(["a", "b"])
+})
+
 test("empty program -> no removable", () => {
   let source = ``
   let names = findRemovableNames(source)
