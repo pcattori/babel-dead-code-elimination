@@ -39,7 +39,11 @@ export default function findRemovableBindings(
  * at all. Reference collection leaves out the referenced ones among these,
  * so a binding read only by other dead code stays a candidate that a later
  * transform can make unreferenced. Keys filtered out of an object rest count
- * as kept here, as they always did for reference collection.
+ * as kept here, as they always did for reference collection. As in
+ * elimination, a default or computed key is read by its own element and a
+ * reassignment counts as a reference from the code doing it, so an element
+ * that only its own default reads, or a variable that only code it keeps
+ * reassigns, is in a closed cycle.
  */
 export function findDeadCycleBindings(
   programPath: NodePath<Babel.Program>,
@@ -140,13 +144,16 @@ export function findDeadCycleBindings(
  * The program's bindings, the references inside each one's declaration, and
  * which bindings are excluded: kept, read from outside every declaration, or
  * reached from such a binding. Undefined when every binding is excluded.
- * @param forElimination - Treat a reassignment inside a declaration like a
- * reference from it, so that it keeps the variable only while the declaration
- * is kept, and attribute a reference in a destructuring default or computed
- * key to the element it belongs to, which elimination removes with it.
- * Otherwise every reassigned binding is excluded and every reference inside
- * a declarator comes from all of its bindings, as reference collection always
- * did.
+ * A reassignment inside a declaration counts like a reference from it, so
+ * that it keeps the variable only while the declaration is kept, and a
+ * reference in a destructuring default or computed key comes from the element
+ * it belongs to and the rests that filter that element out, since elimination
+ * removes it with the element.
+ * @param forElimination - Elimination's graph: with candidates, an
+ * already-empty pattern keeps what its declarator reads, and an element that
+ * binds nothing lends its reads to no binding. Reference collection, without
+ * candidates, lets such an element's reads come from the whole declarator, as
+ * it always did.
  */
 function buildReferenceGraph(
   programPath: NodePath<Babel.Program>,
@@ -202,29 +209,31 @@ function buildReferenceGraph(
     if (containers === undefined) return false
     // Every binding of a declarator keeps its initializer alive; a default or
     // computed key in its pattern only matters while its element stays.
-    if (forElimination) {
-      const owner = findOwningElement(chain)
-      // Candidates keep every pattern that was empty to begin with, and so
-      // the element or declarator that holds one (`{ a, k: {} = x } = y`):
-      // its default or initializer is read from code that elimination keeps.
-      const container = allBindings[containers[0]!]!.path.node
-      if (
-        isKept &&
-        t.isVariableDeclarator(container) &&
-        holdsEmptyPattern(owner?.element ?? container.id)
-      ) {
-        return false
-      }
-      if (owner !== undefined) {
-        // The element's bindings, and the rests that keep it filtered out.
-        // Without candidates, an element that binds nothing and that no rest
-        // filters goes in this pass, and its reads with it.
-        containers = containers.filter((idx) =>
-          [owner.element, ...owner.rests].some((pattern) =>
-            contains(pattern, allBindings[idx]!.identifier),
-          ),
-        )
-      }
+    const owner = findOwningElement(chain)
+    // Candidates keep every pattern that was empty to begin with, and so the
+    // element or declarator that holds one (`{ a, k: {} = x } = y`): its
+    // default or initializer is read from code that elimination keeps.
+    const container = allBindings[containers[0]!]!.path.node
+    if (
+      forElimination &&
+      isKept &&
+      t.isVariableDeclarator(container) &&
+      holdsEmptyPattern(owner?.element ?? container.id)
+    ) {
+      return false
+    }
+    if (
+      owner !== undefined &&
+      (forElimination || !bindsNothing(owner.element))
+    ) {
+      // The element's bindings, and the rests that keep it filtered out.
+      // Without candidates, elimination removes an element that binds nothing
+      // and that no rest filters in this pass, and its reads with it.
+      containers = containers.filter((idx) =>
+        [owner.element, ...owner.rests].some((pattern) =>
+          contains(pattern, allBindings[idx]!.identifier),
+        ),
+      )
     }
     for (const containerIdx of containers) {
       const containerRefs = refs[containerIdx]
@@ -245,8 +254,7 @@ function buildReferenceGraph(
     if (
       !isRemovableDeclaration(binding) ||
       isKept?.(binding) ||
-      (binding.constantViolations.length > 0 &&
-        (!forElimination || isLoopIteratorBinding(binding)))
+      (binding.constantViolations.length > 0 && isLoopIteratorBinding(binding))
     ) {
       excluded[i] = 1
       candidateCount--
@@ -255,8 +263,7 @@ function buildReferenceGraph(
     }
 
     // A reassignment, like a reference, keeps the binding alive only while
-    // the declaration that contains it is kept. Only reached when following
-    // reassignments: otherwise a reassigned binding is excluded above.
+    // the declaration that contains it is kept.
     const reachable =
       binding.constantViolations.every((site) => addEdges(site, i)) &&
       binding.referencePaths.every(
@@ -342,6 +349,9 @@ function holdsEmptyPattern(node: Babel.Node | null): boolean {
   if (t.isRestElement(node)) return holdsEmptyPattern(node.argument)
   return false
 }
+
+const bindsNothing = (pattern: Babel.Node) =>
+  Object.keys(t.getBindingIdentifiers(pattern)).length === 0
 
 /** Whether `identifier` is one of the names `pattern` binds. */
 const contains = (pattern: Babel.Node, identifier: Babel.Identifier) =>

@@ -180,7 +180,9 @@ scopes before your visitor runs.
   leaves out names that only read each other in a closed cycle, such as `x` and
   `foo` in `const x = createServerFn().handler(() => foo()); const foo = () => x`.
   If your transform then strips `x`'s handler, `foo` was never a candidate, so
-  `deadCodeElimination(ast, referenced)` keeps it.
+  `deadCodeElimination(ast, referenced)` keeps it. A destructured name read only
+  by its own default (`const { handler = () => handler() } = config`) and a
+  variable reassigned only by code that it keeps alive count as such cycles.
 
 ## Prior art
 

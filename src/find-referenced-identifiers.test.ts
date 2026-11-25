@@ -152,3 +152,27 @@ test("default collection refreshes references introduced by AST plugins", () => 
     [...findReferencedIdentifiers(ast)].map((path) => path.node.name),
   ).toEqual(["value", "answer"])
 })
+
+test("an element read only by its own default is not referenced", () => {
+  let source = dedent`
+    const { handler = () => handler(), other } = config
+    export const page = () => other
+  `
+  expect(findReferencedNames(source).sort()).toStrictEqual(["other", "page"])
+})
+
+test("an element before a kept rest that reads itself is referenced", () => {
+  let source = dedent`
+    const { handler = () => handler(), ...rest } = config
+    use(rest)
+  `
+  expect(findReferencedNames(source).sort()).toStrictEqual(["handler", "rest"])
+})
+
+test("a variable reassigned only by code that it keeps is not referenced", () => {
+  let source = dedent`
+    let cache = memo(() => refresh)
+    function refresh() { cache = load(cache) }
+  `
+  expect(findReferencedNames(source)).toStrictEqual([])
+})

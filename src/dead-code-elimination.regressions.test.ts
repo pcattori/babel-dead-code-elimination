@@ -426,6 +426,14 @@ describe("missed eliminations", () => {
     expect(transform(source, { candidates: "none" })).toBe(unchanged(source))
   })
 
+  test.each([
+    "const { handler = () => handler(), other } = config\nexport const page = () => other",
+    "const [handler = () => handler(), other] = config\nexport const page = () => other",
+    "let cache = memo(() => refresh)\nfunction refresh() { cache = load(cache) }\nexport const page = 1",
+  ])("changes nothing without a transform: %s", (source) => {
+    expect(transform(source)).toBe(unchanged(source))
+  })
+
   test("removes a closed three-function cycle", () => {
     let source = ts`
       function serialize(v) { return Array.isArray(v) ? serializeArray(v) : serializeObject(v) }
