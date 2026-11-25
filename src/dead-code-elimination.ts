@@ -201,7 +201,6 @@ export default function (
         (!hasCandidates || emptied.has(path.node))
       ) {
         willRemove()
-        markEmptied(path)
         if (!t.isVariableDeclarator(path.parent)) reshapedPattern()
         Pattern.remove(path)
       }
@@ -219,7 +218,6 @@ export default function (
         (!hasCandidates || emptied.has(path.node))
       ) {
         willRemove()
-        markEmptied(path)
         if (!t.isVariableDeclarator(path.parent)) reshapedPattern()
         Pattern.remove(path)
       }
