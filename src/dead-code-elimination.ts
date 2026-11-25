@@ -21,6 +21,7 @@ import findRemovableBindings, {
   isLoopIteratorBinding,
   isReferenced,
   isTypeOnlyExport,
+  redeclarations,
 } from "./find-removable-bindings"
 
 const ELIMINATION_TYPES = new Set([
@@ -76,6 +77,13 @@ export default function (
     if (candidateNodes && !candidateNodes.has(ident.node)) return false
 
     const binding = getDeclaredBinding(ident)
+
+    // A `var` redeclaration goes with the declaration that made the binding.
+    if (
+      binding &&
+      redeclarations(binding).some((r) => r.node.id === ident.node)
+    )
+      return false
 
     // Only remove a declaration whose own binding is known. Removing a sole
     // declarator also removes its declaration, and Babel deletes the name
@@ -139,7 +147,9 @@ export default function (
       if (id.isIdentifier()) {
         if (shouldBeRemoved(id) && !callsInFunction(path)) {
           willRemove()
+          const again = redeclarations(getDeclaredBinding(id)!)
           path.remove()
+          for (const redeclaration of again) redeclaration.remove()
         }
       } else {
         // A parsed declarator binds an identifier or a pattern.

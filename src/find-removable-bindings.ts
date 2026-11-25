@@ -187,6 +187,10 @@ function buildReferenceGraph(
     if (indices) indices.push(i)
     else pathNodeToIdx.set(node, [i])
     refs[i] = null
+    // A `var` redeclaration declares the same binding again: what it reads
+    // and its own reassignment come from that binding.
+    for (const redeclaration of redeclarations(allBindings[i]!))
+      pathNodeToIdx.set(redeclaration.node, [i])
   }
 
   // Reference collection: a kept rest keeps the keys listed before it, which
@@ -322,15 +326,13 @@ function buildReferenceGraph(
  * value of the outermost computed key (`{ [x]: a }`) that holds the
  * reference, with the rest arguments of the object patterns that filter the
  * element out (`{ a = x, ...rest }`). `chain` runs from the reference up to
- * the declarator's `id`, and holds at least the reference: a site is never a
- * declaration (loop heads, which Babel records as reassigned by their own
- * declarator, are excluded before). Undefined when the reference is in the
- * initializer.
+ * the declarator's `id`; it is empty when the site is the declaration itself,
+ * a `var` redeclaration. Undefined when the site is not in the id.
  */
 function findOwningElement(
   chain: NodePath[],
 ): { element: Babel.Node; rests: Babel.Node[] } | undefined {
-  if (chain.at(-1)!.key !== "id") return undefined
+  if (chain.at(-1)?.key !== "id") return undefined
   const rests: Babel.Node[] = []
   // A value inside a pattern sits in a default or a computed key (references
   // in its type annotation are type-only), so the loop returns before it
@@ -544,6 +546,22 @@ export function getDeclaredBinding(
       ? ident.parentPath.scope.parent
       : ident.scope
   return scope.getBinding(ident.node.name)
+}
+
+/**
+ * The statements that declare a `var` binding again with a plain name
+ * (`var x = a; var x`), which elimination removes with the binding.
+ */
+export function redeclarations(
+  binding: Binding,
+): NodePath<Babel.VariableDeclarator>[] {
+  if (binding.kind !== "var" || !binding.path.isVariableDeclarator()) return []
+  return binding.constantViolations.filter(
+    (path): path is NodePath<Babel.VariableDeclarator> =>
+      path.isVariableDeclarator() &&
+      t.isIdentifier(path.node.id) &&
+      path.parentPath.listKey === "body",
+  )
 }
 
 export function isLoopIteratorBinding(binding: Binding): boolean {

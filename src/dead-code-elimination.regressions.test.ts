@@ -465,6 +465,17 @@ describe("missed eliminations", () => {
     expect(transform(source)).toBe(unchanged(source))
   })
 
+  test.each([
+    ["var x = a\nvar x\nexport const z = 1", "export const z = 1;"],
+    ["var x = a\nvar x = b\nexport const z = 1", "export const z = 1;"],
+    ["var x = a\nvar x\nuse(x)", "var x = a;\nvar x;\nuse(x);"],
+  ])(
+    "removes an unused var with its redeclarations: %s",
+    (source, expected) => {
+      expect(transform(source, { candidates: "none" })).toBe(expected)
+    },
+  )
+
   test("removes a closed three-function cycle", () => {
     let source = ts`
       function serialize(v) { return Array.isArray(v) ? serializeArray(v) : serializeObject(v) }
