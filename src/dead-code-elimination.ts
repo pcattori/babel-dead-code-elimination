@@ -47,15 +47,19 @@ export default function (
   let removableBindings: Set<Binding>
   let snapshot: BindingSnapshot | undefined
 
-  const hasCandidates = candidates !== undefined
+  // Candidates are matched by node: a transform that rebuilds a declaration
+  // around its own id node gives the id a new path, but it stays a candidate.
+  let candidateNodes: Set<Babel.Node> | undefined
+  if (candidates !== undefined) {
+    candidateNodes = new Set()
+    for (const candidate of candidates) candidateNodes.add(candidate.node)
+  }
+  const hasCandidates = candidateNodes !== undefined
   // Elimination keeps bindings outside the candidate set, so they must keep
   // everything they reference alive, including members of reference cycles.
-  let isKept: ((binding: Binding) => boolean) | undefined
-  if (hasCandidates) {
-    const candidateNodes = new Set<Babel.Node>()
-    for (const candidate of candidates) candidateNodes.add(candidate.node)
-    isKept = (binding) => !candidateNodes.has(binding.identifier)
-  }
+  const isKept = candidateNodes
+    ? (binding: Binding) => !candidateNodes.has(binding.identifier)
+    : undefined
   // Patterns that elimination emptied. With candidates, a pattern that was
   // empty to begin with (`const {} = init()`) is kept with its initializer.
   const emptied = new WeakSet<Babel.Node>()
@@ -69,7 +73,7 @@ export default function (
     }
   }
   const shouldBeRemoved = (ident: NodePath<Babel.Identifier>): boolean => {
-    if (hasCandidates && !candidates.has(ident)) return false
+    if (candidateNodes && !candidateNodes.has(ident.node)) return false
 
     const binding = getDeclaredBinding(ident)
 

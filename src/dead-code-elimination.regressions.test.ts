@@ -100,6 +100,36 @@ let unchanged = (code: string, typescript = false) =>
   generate(parseModule(code, typescript)).code
 
 describe("dangling references", () => {
+  test("keeps a candidate whose declarator a transform rebuilds around its id", () => {
+    let source = ts`
+      const a = h()
+      const b = () => 1
+      use(a, b)
+    `
+    let ast = parseModule(source)
+    let referenced = findReferencedIdentifiers(ast)
+    let rebuilt = false
+    traverse(ast, {
+      ExpressionStatement(path) {
+        path.remove()
+      },
+      VariableDeclarator(path) {
+        let id = path.node.id
+        if (rebuilt || !t.isIdentifier(id, { name: "a" })) return
+        rebuilt = true
+        // The id node moves into a new declarator, so its path is new.
+        path.replaceWith(
+          t.variableDeclarator(
+            id,
+            t.callExpression(t.identifier("g"), [t.identifier("b")]),
+          ),
+        )
+      },
+    })
+    deadCodeElimination(ast, referenced)
+    expect(generate(ast).code).toBe("")
+  })
+
   test("keeps an initializer that a surviving sibling binding still needs", () => {
     let source = ts`
       function createStore() {
