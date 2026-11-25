@@ -198,15 +198,16 @@ function buildReferenceGraph(
   // count as used only while the rest does. Elimination keeps those keys
   // itself while the rest stays.
   if (!forElimination) {
-    const byIdentifier = new Map<Babel.Node, number>()
-    for (let i = 0; i < n; i++) byIdentifier.set(allBindings[i]!.identifier, i)
+    const indexOf = new Map<Binding, number>()
+    for (let i = 0; i < n; i++) indexOf.set(allBindings[i]!, i)
     for (let i = 0; i < n; i++) {
-      const declarator = allBindings[i]!.path.node
+      const binding = allBindings[i]!
+      const declarator = binding.path.node
       if (!t.isVariableDeclarator(declarator)) continue
-      const rests = filteringRests(declarator.id, allBindings[i]!.identifier)
-      for (const rest of rests ?? []) {
-        const r = byIdentifier.get(rest)
-        if (r !== undefined) (refs[r] ??= []).push(i)
+      // A declarator's binding names one of its identifiers.
+      for (const rest of filteringRests(declarator.id, binding.identifier)!) {
+        const name = (rest as Babel.Identifier).name
+        ;(refs[indexOf.get(bindingsByName[name]!)!] ??= []).push(i)
       }
     }
   }

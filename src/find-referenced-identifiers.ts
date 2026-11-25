@@ -52,13 +52,11 @@ function deadCyclesByScope(): DeadCycles {
 }
 
 function declarationVisitor(
-  program: (path: NodePath<Babel.Program>) => void,
   identifier: (path: IdentifierPath) => void,
 ): Visitor {
   const declaration = (path: NodePath) =>
     forEachDeclaredIdentifier(path, identifier)
   return {
-    Program: program,
     ImportDeclaration: declaration,
     VariableDeclarator: declaration,
     FunctionDeclaration: declaration,
@@ -101,13 +99,7 @@ export function collectReferencedIdentifiers(
   options: ScopeOptions & { visitor: Visitor },
 ): () => Set<IdentifierPath> {
   const identifiers: Array<IdentifierPath> = []
-  let programPath!: NodePath<Babel.Program>
-  const visitor = declarationVisitor(
-    (path) => {
-      programPath = path
-    },
-    (ident) => identifiers.push(ident),
-  )
+  const visitor = declarationVisitor((ident) => identifiers.push(ident))
   if (!options.scopeIsFresh && mustCrawlProgram(ast)) {
     visitor.enter = (path) => {
       // File traversal starts at Program. Restore the supplied generic callbacks
