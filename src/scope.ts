@@ -101,10 +101,12 @@ export function refreshBindings(snapshot: BindingSnapshot): boolean {
     bindings[name] = binding
     if (dropRemovedPaths(binding)) lost = true
   }
+  // A retained binding is never removed, so a reference it lost cannot let
+  // another pass remove more.
   const bindings = snapshot.programPath.scope.bindings
   for (const [name, binding] of snapshot.retained) {
     bindings[name] = binding
-    if (dropRemovedPaths(binding)) lost = true
+    dropRemovedPaths(binding)
   }
   return lost
 }
