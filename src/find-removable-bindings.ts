@@ -92,15 +92,15 @@ export function findDeadCycleBindings(scopePath: NodePath): Set<Binding> {
         if (indices[w] === -1) {
           visit(w)
         } else if (onStack[w]) {
-          if (indices[w]! < lowlink[v]!) lowlink[v] = indices[w]!
+          lowlink[v] = Math.min(lowlink[v]!, indices[w]!)
         }
         continue
       }
 
       callStack.pop()
       const parent = callStack[callStack.length - 1]
-      if (parent !== undefined && lowlink[v]! < lowlink[parent]!) {
-        lowlink[parent] = lowlink[v]!
+      if (parent !== undefined) {
+        lowlink[parent] = Math.min(lowlink[parent]!, lowlink[v]!)
       }
 
       if (lowlink[v] === indices[v]) {
@@ -567,17 +567,11 @@ export function redeclarations(
 }
 
 export function isLoopIteratorBinding(binding: Binding): boolean {
-  if (binding.path.type === "VariableDeclarator") {
-    const declPath = binding.path.parentPath
-    if (
-      declPath?.key === "left" &&
-      (declPath.parent.type === "ForOfStatement" ||
-        declPath.parent.type === "ForInStatement")
-    ) {
-      return true
-    }
-  }
-  return false
+  // Only a for-in or for-of head holds a declaration under the key `left`.
+  return (
+    binding.path.isVariableDeclarator() &&
+    binding.path.parentPath.key === "left"
+  )
 }
 
 /**

@@ -83,8 +83,10 @@ export function findDeclarator(
   path: NodePath<t.ObjectPattern | t.ArrayPattern>,
 ): NodePath<t.VariableDeclarator> | null {
   let child: NodePath = path
-  let parent: NodePath | null = path.parentPath
-  while (parent) {
+  // A pattern is never the program, so every link up to a declarator or to a
+  // node that is not part of a pattern has a parent.
+  let parent: NodePath = path.parentPath
+  for (;;) {
     if (parent.isVariableDeclarator()) {
       // A for-in/of head needs its declaration: `for (const {} of items)`.
       let isLoopHead = parent.parentPath.key === "left"
@@ -98,9 +100,8 @@ export function findDeclarator(
       parent.isRestElement()
     if (!isPatternLink) return null
     child = parent
-    parent = parent.parentPath
+    parent = parent.parentPath!
   }
-  return null
 }
 
 /**
