@@ -138,15 +138,18 @@ export function findDeadCycleBindings(
  * The program's bindings, the references inside each one's declaration, and
  * which bindings are excluded: kept, read from outside every declaration, or
  * reached from such a binding. Undefined when every binding is excluded.
- * @param followReassignments - Treat a reassignment inside a declaration like
- * a reference from it, so that it keeps the variable only while the
- * declaration is kept. Otherwise every reassigned binding is excluded, as
- * reference collection always did.
+ * @param forElimination - Treat a reassignment inside a declaration like a
+ * reference from it, so that it keeps the variable only while the declaration
+ * is kept, and attribute a reference in a destructuring default or computed
+ * key to the element it belongs to, which elimination removes with it.
+ * Otherwise every reassigned binding is excluded and every reference inside
+ * a declarator comes from all of its bindings, as reference collection always
+ * did.
  */
 function buildReferenceGraph(
   programPath: NodePath<Babel.Program>,
   isKept?: (binding: Binding) => boolean,
-  followReassignments = false,
+  forElimination = false,
 ):
   | { bindings: Binding[]; refs: (number[] | null)[]; excluded: Uint8Array }
   | undefined {
@@ -187,12 +190,29 @@ function buildReferenceGraph(
   // `site`. False when no declaration contains it.
   const addEdges = (site: NodePath, target: number): boolean => {
     let containers: number[] | undefined
+    // The path from `site` up to the declaration, the declaration excluded.
+    const chain: NodePath[] = []
     for (let path: NodePath | null = site; path; path = path.parentPath) {
       containers = pathNodeToIdx.get(path.node)
       if (containers !== undefined) break
+      chain.push(path)
     }
     if (containers === undefined) return false
-    // Every binding of a declarator keeps its initializer alive.
+    // Every binding of a declarator keeps its initializer alive; a default or
+    // computed key in its pattern only matters while its element stays.
+    if (forElimination && containers.length > 1) {
+      const owner = findOwningElement(chain)
+      if (owner !== undefined) {
+        // The element's bindings, and the rests that keep it filtered out.
+        const owners = containers.filter((idx) =>
+          [owner.element, ...owner.rests].some((pattern) =>
+            contains(pattern, allBindings[idx]!.identifier),
+          ),
+        )
+        // An empty element binds nothing and keeps the declarator's edges.
+        if (owners.length > 0) containers = owners
+      }
+    }
     for (const containerIdx of containers) {
       const containerRefs = refs[containerIdx]
       if (!containerRefs) {
@@ -213,7 +233,7 @@ function buildReferenceGraph(
       !isRemovableDeclaration(binding) ||
       isKept?.(binding) ||
       (binding.constantViolations.length > 0 &&
-        (!followReassignments || isLoopIteratorBinding(binding)))
+        (!forElimination || isLoopIteratorBinding(binding)))
     ) {
       excluded[i] = 1
       candidateCount--
@@ -254,6 +274,38 @@ function buildReferenceGraph(
   if (candidateCount === 0) return undefined
   return { bindings: allBindings, refs, excluded }
 }
+
+/**
+ * The pattern element that owns a reference inside a declarator's id: the
+ * target of the outermost default (`{ a = x }`, `[{ a, b } = x]`) or the
+ * value of the outermost computed key (`{ [x]: a }`) that holds the
+ * reference, with the rest arguments of the object patterns that filter the
+ * element out (`{ a = x, ...rest }`). `chain` runs from the reference up to
+ * the declarator's `id`. Undefined when the reference is in the initializer.
+ */
+function findOwningElement(
+  chain: NodePath[],
+): { element: Babel.Node; rests: Babel.Node[] } | undefined {
+  if (chain.at(-1)?.key !== "id") return undefined
+  const rests: Babel.Node[] = []
+  for (let k = chain.length - 1; k > 0; k--) {
+    const node = chain[k]!.node
+    const child = chain[k - 1]!.node
+    if (t.isObjectPattern(node)) {
+      const last = node.properties.at(-1)
+      if (t.isRestElement(last) && last !== child) rests.push(last.argument)
+    }
+    if (t.isAssignmentPattern(node) && child === node.right)
+      return { element: node.left, rests }
+    if (t.isObjectProperty(node) && child === node.key)
+      return { element: node.value, rests }
+  }
+  return undefined
+}
+
+/** Whether `identifier` is one of the names `pattern` binds. */
+const contains = (pattern: Babel.Node, identifier: Babel.Identifier) =>
+  t.getBindingIdentifiers(pattern)[identifier.name] === identifier
 
 // Elimination only removes these declarations. Any other binding (such as a
 // TypeScript enum) is kept and keeps everything it references alive.

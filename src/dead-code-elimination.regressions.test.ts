@@ -349,6 +349,44 @@ describe("missed eliminations", () => {
     expect(transform(source, { candidates: "none" })).toBe(unchanged(source))
   })
 
+  test.each([
+    [
+      "its own element",
+      "const { handler = () => handler(), other } = config; use(other)",
+      "const {\n  other\n} = config;\nuse(other);",
+    ],
+    [
+      "its own array element",
+      "const [handler = () => handler(), other] = config; use(other)",
+      "const [, other] = config;\nuse(other);",
+    ],
+    [
+      "a sibling that reads it back",
+      "const { a = () => b, b = () => a, c } = config; use(c)",
+      "const {\n  c\n} = config;\nuse(c);",
+    ],
+    [
+      "a function that reads it back",
+      "const { a = () => g(), b } = config; function g() { return a } use(b)",
+      "const {\n  b\n} = config;\nuse(b);",
+    ],
+    [
+      "the rest that filters it",
+      "const { a, [rest.key]: b, ...rest } = config; use(a)",
+      "const {\n  a\n} = config;\nuse(a);",
+    ],
+  ])(
+    "removes an element whose default or key reads only %s",
+    (_, source, expected) => {
+      expect(transform(source, { candidates: "none" })).toBe(expected)
+    },
+  )
+
+  test("keeps an element that reads itself before a kept rest", () => {
+    let source = "const { a = () => a, ...rest } = config; use(rest)"
+    expect(transform(source, { candidates: "none" })).toBe(unchanged(source))
+  })
+
   test("removes a closed three-function cycle", () => {
     let source = ts`
       function serialize(v) { return Array.isArray(v) ? serializeArray(v) : serializeObject(v) }
