@@ -2,7 +2,6 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { queryOptions } from "@tanstack/react-query";
 import { z } from "zod";
-import * as schema from "~/server/schema";
 import { type ColumnDef } from "~/components/data-table";
 const Pagination = z.object({
   page: z.number().int().min(1).default(1),

@@ -514,3 +514,30 @@ describe("calls in functions", () => {
     },
   )
 })
+
+describe("values used only in types", () => {
+  test.each([
+    ["typeof in a type alias", "type Input = z.infer<typeof schema>"],
+    ["as typeof", "export const x = 0 as unknown as typeof schema"],
+    ["satisfies typeof", "export const x = {} satisfies typeof schema"],
+    ["type argument", "export const x = f<typeof schema>()"],
+    ["implements", "export class C implements schema {}"],
+  ])("removes a value read only in %s", (_, usage) => {
+    let source = ts`
+      import { z } from "zod"
+      const schema = z.object({})
+      ${usage}
+      export function loader() { return schema.parse(1) }
+      export const fn = 1
+    `
+    let stripped = transform(source, { strip: ["loader"], typescript: true })
+    let fresh = transform(source.replace(/export function loader.*\n/, ""), {
+      candidates: "none",
+      typescript: true,
+    })
+    for (let output of [stripped, fresh]) {
+      expect(output).not.toContain("const schema")
+      expect(output).not.toContain("zod")
+    }
+  })
+})

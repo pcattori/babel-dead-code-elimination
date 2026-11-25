@@ -147,18 +147,33 @@ function isRestFilteredBinding(binding: Binding): boolean {
   )
 }
 
+// Nodes whose child names a value only in a type: `typeof x`, `T<x.y>`,
+// `implements x`, `interface I extends x`.
+const TYPE_REFERENCE_PARENTS = new Set([
+  "TSTypeQuery",
+  "TSTypeReference",
+  "TSExpressionWithTypeArguments",
+  "TSInterfaceHeritage",
+  "TSClassImplements",
+])
+
 /**
  * Babel counts the name of a same-named TypeScript type alias, interface or
- * overload signature as a reference to a value binding. These disappear with
- * the types and never read the value.
+ * overload signature, and a name used in a type (`typeof x`), as a reference
+ * to a value binding. These disappear with the types and never read the value.
  */
 function isTypeOnlyReference(path: NodePath): boolean {
-  return (
+  if (
     path.key === "id" &&
     (path.parentPath?.isTSTypeAliasDeclaration() ||
       path.parentPath?.isTSInterfaceDeclaration() ||
       path.parentPath?.isTSDeclareFunction()) === true
-  )
+  ) {
+    return true
+  }
+  let parent = path.parentPath
+  while (parent?.isTSQualifiedName()) parent = parent.parentPath
+  return parent !== null && TYPE_REFERENCE_PARENTS.has(parent.type)
 }
 
 /** Whether code other than TypeScript declarations references the binding. */
