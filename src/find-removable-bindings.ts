@@ -217,13 +217,13 @@ function buildReferenceGraph(
       }
       if (owner !== undefined) {
         // The element's bindings, and the rests that keep it filtered out.
-        const owners = containers.filter((idx) =>
+        // Without candidates, an element that binds nothing and that no rest
+        // filters goes in this pass, and its reads with it.
+        containers = containers.filter((idx) =>
           [owner.element, ...owner.rests].some((pattern) =>
             contains(pattern, allBindings[idx]!.identifier),
           ),
         )
-        // An empty element binds nothing and keeps the declarator's edges.
-        if (owners.length > 0) containers = owners
       }
     }
     for (const containerIdx of containers) {
@@ -294,14 +294,20 @@ function buildReferenceGraph(
  * value of the outermost computed key (`{ [x]: a }`) that holds the
  * reference, with the rest arguments of the object patterns that filter the
  * element out (`{ a = x, ...rest }`). `chain` runs from the reference up to
- * the declarator's `id`. Undefined when the reference is in the initializer.
+ * the declarator's `id`, and holds at least the reference: a site is never a
+ * declaration (loop heads, which Babel records as reassigned by their own
+ * declarator, are excluded before). Undefined when the reference is in the
+ * initializer.
  */
 function findOwningElement(
   chain: NodePath[],
 ): { element: Babel.Node; rests: Babel.Node[] } | undefined {
-  if (chain.at(-1)?.key !== "id") return undefined
+  if (chain.at(-1)!.key !== "id") return undefined
   const rests: Babel.Node[] = []
-  for (let k = chain.length - 1; k > 0; k--) {
+  // A value inside a pattern sits in a default or a computed key (references
+  // in its type annotation are type-only), so the loop returns before it
+  // reaches the reference.
+  for (let k = chain.length - 1; ; k--) {
     const node = chain[k]!.node
     const child = chain[k - 1]!.node
     if (t.isObjectPattern(node)) {
@@ -313,7 +319,6 @@ function findOwningElement(
     if (t.isObjectProperty(node) && child === node.key)
       return { element: node.value, rests }
   }
-  return undefined
 }
 
 /** Whether a pattern is or holds an empty object or array pattern. */
@@ -321,10 +326,9 @@ function holdsEmptyPattern(node: Babel.Node | null): boolean {
   if (t.isObjectPattern(node)) {
     return (
       node.properties.length === 0 ||
+      // An object rest binds a name: its `value` is undefined.
       node.properties.some((property) =>
-        holdsEmptyPattern(
-          t.isRestElement(property) ? property.argument : property.value,
-        ),
+        holdsEmptyPattern((property as Babel.ObjectProperty).value),
       )
     )
   }
