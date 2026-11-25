@@ -311,19 +311,23 @@ function isRestFilteredBinding(binding: Binding): boolean {
 }
 
 // Nodes whose child names a value only in a type: `typeof x`, `T<x.y>`,
-// `implements x`, `interface I extends x`.
+// `implements x`, `interface I extends x`, and computed keys in types
+// (`{ [x]: T }`, `{ [x.y](): T }`).
 const TYPE_REFERENCE_PARENTS = new Set([
   "TSTypeQuery",
   "TSTypeReference",
   "TSExpressionWithTypeArguments",
   "TSInterfaceHeritage",
   "TSClassImplements",
+  "TSPropertySignature",
+  "TSMethodSignature",
 ])
 
 /**
  * Babel counts the name of a same-named TypeScript type alias, interface or
- * overload signature, and a name used in a type (`typeof x`), as a reference
- * to a value binding. These disappear with the types and never read the value.
+ * overload signature, and a name used in a type (`typeof x`, a computed key),
+ * as a reference to a value binding. These disappear with the types and never
+ * read the value.
  */
 function isTypeOnlyReference(path: NodePath): boolean {
   if (
@@ -334,8 +338,12 @@ function isTypeOnlyReference(path: NodePath): boolean {
   ) {
     return true
   }
+  // Climb the dotted name the reference starts: `x.y` in a type is a
+  // qualified name, and in a computed key a member expression.
   let parent = path.parentPath
-  while (parent?.isTSQualifiedName()) parent = parent.parentPath
+  while (parent?.isTSQualifiedName() || parent?.isMemberExpression()) {
+    parent = parent.parentPath
+  }
   return parent !== null && TYPE_REFERENCE_PARENTS.has(parent.type)
 }
 

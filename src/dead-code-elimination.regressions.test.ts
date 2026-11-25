@@ -561,6 +561,8 @@ describe("values used only in types", () => {
     ["satisfies typeof", "export const x = {} satisfies typeof schema"],
     ["type argument", "export const x = f<typeof schema>()"],
     ["implements", "export class C implements schema {}"],
+    ["a computed key in an interface", "interface I { [schema]: number }"],
+    ["a computed method key", "type T = { [schema.key](): void }"],
   ])("removes a value read only in %s", (_, usage) => {
     let source = ts`
       import { z } from "zod"
@@ -578,6 +580,19 @@ describe("values used only in types", () => {
       expect(output).not.toContain("const schema")
       expect(output).not.toContain("zod")
     }
+  })
+
+  test.each([
+    ["typeof in an expression", "export const kind = typeof schema"],
+    ["a computed key in a class", "export class C { [schema.key] = 1 }"],
+  ])("keeps a value read by %s", (_, usage) => {
+    let source = ts`
+      import { z } from "zod"
+      const schema = z.object({})
+      ${usage}
+    `
+    let output = transform(source, { candidates: "none", typescript: true })
+    expect(output).toContain("const schema")
   })
 })
 
