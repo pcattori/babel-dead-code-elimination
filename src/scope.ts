@@ -6,7 +6,7 @@ import {
   type Binding,
 } from "./babel-esm"
 import { DECLARATION_TYPES, forEachDeclaredIdentifier } from "./declarations"
-import { getDeclaredBinding, isReferenced } from "./find-removable-bindings"
+import { getDeclaredBinding } from "./find-removable-bindings"
 import { forEachMatchingPath } from "./walk"
 
 /**
@@ -84,8 +84,10 @@ export function snapshotBindings(
  * violations in removed code are dropped, removed declarations leave their
  * scope, and bindings that Babel deleted by name while removing a same-named
  * declaration elsewhere are registered again. Returns whether a declaration
- * that is still there became unused or constant: only then can another pass
- * remove more.
+ * that is still there lost a reference or became constant: only then can
+ * another pass remove more. Losing any reference counts, not only the last:
+ * in `function f() { return f() }; const [] = g(f)`, removing the empty
+ * pattern drops the only reference to `f` from outside the cycle.
  */
 export function refreshBindings(snapshot: BindingSnapshot): boolean {
   let lost = false
@@ -102,14 +104,14 @@ export function refreshBindings(snapshot: BindingSnapshot): boolean {
   const bindings = snapshot.programPath.scope.bindings
   for (const [name, binding] of snapshot.retained) {
     bindings[name] = binding
-    dropRemovedPaths(binding)
+    if (dropRemovedPaths(binding)) lost = true
   }
   return lost
 }
 
-/** Drops removed paths, and returns whether the binding became unused or constant. */
+/** Drops removed paths, and returns whether the binding lost a reference or became constant. */
 function dropRemovedPaths(binding: Binding): boolean {
-  const wasReferenced = isReferenced(binding)
+  const references = binding.referencePaths.length
   const wasConstant = binding.constantViolations.length === 0
   binding.referencePaths = binding.referencePaths.filter(isAttached)
   binding.references = binding.referencePaths.length
@@ -117,7 +119,7 @@ function dropRemovedPaths(binding: Binding): boolean {
   binding.constantViolations = binding.constantViolations.filter(isAttached)
   binding.constant = binding.constantViolations.length === 0
   return (
-    (wasReferenced && !isReferenced(binding)) ||
+    binding.referencePaths.length < references ||
     (!wasConstant && binding.constant)
   )
 }

@@ -369,6 +369,28 @@ describe("missed eliminations", () => {
     expect(output).toBe(unchanged("export function f() { return 1 }"))
   })
 
+  test("removes a self-calling function once a removed local was its only outside use", () => {
+    let source = ts`
+      function loop() { return loop() }
+      export function f() {
+        const alias = loop
+        return 1
+      }
+    `
+    let output = transform(source, { candidates: "none" })
+    expect(output).toBe(unchanged("export function f() { return 1 }"))
+  })
+
+  test("removes a self-calling function once a removed empty pattern was its only outside use", () => {
+    let source = ts`
+      function loop() { return loop() }
+      const [] = make(loop)
+      export const kept = 1
+    `
+    let output = transform(source, { candidates: "none" })
+    expect(output).toBe(unchanged("export const kept = 1"))
+  })
+
   test("cleans up patterns inside functions after their bindings are removed", () => {
     let source = ts`
       export function keep() {

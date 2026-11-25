@@ -95,7 +95,7 @@ export default function (
 
   // Call before removing anything but imports. Such a removal can make Babel
   // drop unrelated bindings by name, so bindings are recorded before the first
-  // one. Whether it made another declaration unused is decided after the pass,
+  // one. Whether it can let another pass remove more is decided after the pass,
   // from the references it dropped (see refreshBindings).
   let removedAny = false
   const willRemove = (): void => {
@@ -275,8 +275,8 @@ export default function (
     if (!removedAny) break
     removedAny = false
     // Refresh even when no pass follows, so the bindings match the output.
-    const newlyUnused = refreshBindings(snapshot!)
-    if (!needsAnotherPass && !newlyUnused) break
+    const lostReference = refreshBindings(snapshot!)
+    if (!needsAnotherPass && !lostReference) break
     needsAnotherPass = false
     removableBindings = findRemovableBindings(programPath, isKept)
   }
