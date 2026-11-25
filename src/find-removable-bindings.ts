@@ -5,6 +5,8 @@ import { isRestFiltered } from "./pattern"
  * Finds bindings that nothing elimination keeps can reach, through references
  * inside declarations.
  * @param isKept - Bindings that elimination keeps regardless of references.
+ * Given exactly when elimination has candidates, which also keep every
+ * pattern that was empty to begin with.
  */
 export default function findRemovableBindings(
   programPath: NodePath<Babel.Program>,
@@ -200,8 +202,19 @@ function buildReferenceGraph(
     if (containers === undefined) return false
     // Every binding of a declarator keeps its initializer alive; a default or
     // computed key in its pattern only matters while its element stays.
-    if (forElimination && containers.length > 1) {
+    if (forElimination) {
       const owner = findOwningElement(chain)
+      // Candidates keep every pattern that was empty to begin with, and so
+      // the element or declarator that holds one (`{ a, k: {} = x } = y`):
+      // its default or initializer is read from code that elimination keeps.
+      const container = allBindings[containers[0]!]!.path.node
+      if (
+        isKept &&
+        t.isVariableDeclarator(container) &&
+        holdsEmptyPattern(owner?.element ?? container.id)
+      ) {
+        return false
+      }
       if (owner !== undefined) {
         // The element's bindings, and the rests that keep it filtered out.
         const owners = containers.filter((idx) =>
@@ -301,6 +314,29 @@ function findOwningElement(
       return { element: node.value, rests }
   }
   return undefined
+}
+
+/** Whether a pattern is or holds an empty object or array pattern. */
+function holdsEmptyPattern(node: Babel.Node | null): boolean {
+  if (t.isObjectPattern(node)) {
+    return (
+      node.properties.length === 0 ||
+      node.properties.some((property) =>
+        holdsEmptyPattern(
+          t.isRestElement(property) ? property.argument : property.value,
+        ),
+      )
+    )
+  }
+  if (t.isArrayPattern(node)) {
+    return (
+      node.elements.every((element) => element === null) ||
+      node.elements.some(holdsEmptyPattern)
+    )
+  }
+  if (t.isAssignmentPattern(node)) return holdsEmptyPattern(node.left)
+  if (t.isRestElement(node)) return holdsEmptyPattern(node.argument)
+  return false
 }
 
 /** Whether `identifier` is one of the names `pattern` binds. */

@@ -138,6 +138,45 @@ describe("dangling references", () => {
     },
   )
 
+  test.each([
+    [
+      "a default",
+      "const { a, k: {} = def(q) } = mk(); const q = 1",
+      "const {\n  k: {} = def(q)\n} = mk();\nconst q = 1;",
+    ],
+    [
+      "a nested default",
+      "const { k: { a, e: {} } = def(q) } = mk(); const q = 1",
+      "const {\n  k: {\n    e: {}\n  } = def(q)\n} = mk();\nconst q = 1;",
+    ],
+    [
+      "its initializer",
+      "const { a, k: {} } = mk(() => q); const q = 1",
+      "const {\n  k: {}\n} = mk(() => q);\nconst q = 1;",
+    ],
+    [
+      "its initializer, which reads its own element",
+      "const [a, []] = mk(() => a)",
+      "const [a, []] = mk(() => a);",
+    ],
+  ])(
+    "keeps what an already-empty pattern's declarator reads in %s (candidates)",
+    (_, source, expected) => {
+      let output = transform(source, {
+        candidates: (ast) => {
+          let candidates = new Set<NodePath<Babel.Identifier>>()
+          traverse(ast, {
+            Identifier(path) {
+              if (path.isBindingIdentifier()) candidates.add(path)
+            },
+          })
+          return candidates
+        },
+      })
+      expect(output).toBe(expected)
+    },
+  )
+
   test("keeps a candidate that a kept non-candidate references", () => {
     let source = ts`
       function makeRegistry() { return { get: () => registry } }
