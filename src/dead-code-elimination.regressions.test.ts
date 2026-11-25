@@ -537,6 +537,15 @@ describe("calls in functions", () => {
     ["an awaited call", "const handle = await register()", "handle"],
     ["a constructor call", "const handle = new Registration()", "handle"],
     ["a destructured call", "const { entry } = register()", "entry"],
+    ["a member of a call", "const handle = useCtx().value", "handle"],
+    ["a conditional call", "const handle = ready ? register() : 0", "handle"],
+    ["an array of calls", "const handle = [register()]", "handle"],
+    ["a call with a fallback", "const handle = register() ?? 0", "handle"],
+    [
+      "a sequence ending in a call",
+      "const handle = (log(), register())",
+      "handle",
+    ],
   ])(
     "keeps a declaration initialized with %s whose result becomes unused",
     (_, declaration, name) => {
@@ -552,6 +561,16 @@ describe("calls in functions", () => {
       expect(output).not.toContain("alias")
     },
   )
+
+  test("removes a declaration whose call is only in a nested function", () => {
+    let source = ts`
+      export function run() {
+        const later = () => register()
+        return 1
+      }
+    `
+    expect(transform(source, { candidates: "none" })).not.toContain("later")
+  })
 })
 
 describe("values used only in types", () => {

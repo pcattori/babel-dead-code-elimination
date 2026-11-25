@@ -326,30 +326,37 @@ const isSameNamedType = (path: NodePath): boolean =>
     path.parentPath?.isTSInterfaceDeclaration() === true)
 
 /**
- * Whether a declarator inside a function initializes its bindings with a call.
+ * Whether a declarator inside a function evaluates a call when its initializer
+ * runs, directly or nested (`useId()`, `useCtx().value`, `c ? useA() : 0`,
+ * `[useA()]`), but not in a nested function (`() => useA()` runs nothing).
  * Such calls run on every invocation, and some must run in the same order in
  * every build: removing an unused `const id = useId()` from a component only in
  * the server build shifts React's hook-based ids. Declarations like these are
  * kept even when their bindings are unused.
  */
 function callsInFunction(path: NodePath<Babel.VariableDeclarator>): boolean {
-  let init = path.node.init
-  while (
-    t.isAwaitExpression(init) ||
-    t.isParenthesizedExpression(init) ||
-    t.isTSAsExpression(init) ||
-    t.isTSSatisfiesExpression(init) ||
-    t.isTSNonNullExpression(init) ||
-    t.isTSTypeAssertion(init) ||
-    t.isTypeCastExpression(init)
+  return path.getFunctionParent() !== null && evaluatesCall(path.node.init)
+}
+
+function evaluatesCall(node: Babel.Node | null | undefined): boolean {
+  if (!node || t.isFunction(node)) return false
+  if (
+    t.isCallExpression(node) ||
+    t.isOptionalCallExpression(node) ||
+    t.isNewExpression(node) ||
+    t.isTaggedTemplateExpression(node)
   ) {
-    init = t.isAwaitExpression(init) ? init.argument : init.expression
+    return true
   }
-  return (
-    (t.isCallExpression(init) ||
-      t.isOptionalCallExpression(init) ||
-      t.isNewExpression(init) ||
-      t.isTaggedTemplateExpression(init)) &&
-    path.getFunctionParent() !== null
-  )
+  for (const key of t.VISITOR_KEYS[node.type]!) {
+    const child = (node as unknown as Record<string, unknown>)[key]
+    if (
+      Array.isArray(child)
+        ? child.some((element) => evaluatesCall(element as Babel.Node | null))
+        : evaluatesCall(child as Babel.Node | null)
+    ) {
+      return true
+    }
+  }
+  return false
 }
