@@ -168,9 +168,6 @@ function buildReferenceGraph(
     refs[i] = null
   }
 
-  const indexOf = new Map<string, number>()
-  for (let i = 0; i < n; i++) indexOf.set(names[i]!, i)
-
   // Mark bindings as excluded (not removable) if they have external refs, reassignments, are loop iterators, or are kept
   const excluded = new Uint8Array(n)
   // excluded bindings whose refs need to be excluded too
@@ -191,20 +188,6 @@ function buildReferenceGraph(
       candidateCount--
       exclusionQueue.push(i)
       continue
-    }
-
-    // A key filtered out of an object rest stays while that rest is kept, so
-    // the rest binding keeps it alive like a reference would.
-    if (isRestFilteredBinding(binding)) {
-      for (const restName of restNames(
-        binding.path.node as Babel.VariableDeclarator,
-      )) {
-        const restIdx = indexOf.get(restName)
-        if (restIdx === undefined) continue
-        const restRefs = refs[restIdx]
-        if (!restRefs) refs[restIdx] = [i]
-        else if (!restRefs.includes(i)) restRefs.push(i)
-      }
     }
 
     for (const refPath of binding.referencePaths) {
@@ -273,31 +256,6 @@ function isRemovableDeclaration(binding: Binding): boolean {
       return true
   }
   return false
-}
-
-/** The names bound by object rest elements in a declarator's pattern. */
-function restNames(declarator: Babel.VariableDeclarator): string[] {
-  const result: string[] = []
-  const visit = (node: Babel.Node | null | undefined): void => {
-    if (!node) return
-    if (t.isObjectPattern(node)) {
-      for (const property of node.properties) {
-        if (t.isRestElement(property)) {
-          if (t.isIdentifier(property.argument))
-            result.push(property.argument.name)
-          else visit(property.argument)
-        } else visit(property.value)
-      }
-    } else if (t.isArrayPattern(node)) {
-      for (const element of node.elements) visit(element)
-    } else if (t.isAssignmentPattern(node)) {
-      visit(node.left)
-    } else if (t.isRestElement(node)) {
-      visit(node.argument)
-    }
-  }
-  visit(declarator.id)
-  return result
 }
 
 // Elimination keeps object pattern properties that are filtered out of a rest
