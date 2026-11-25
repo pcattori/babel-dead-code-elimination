@@ -541,3 +541,20 @@ describe("values used only in types", () => {
     }
   })
 })
+
+describe("object rest in a cycle", () => {
+  test.each([
+    ["itself", "const { a, b, ...rest } = make(() => rest)"],
+    [
+      "a function",
+      "const { a, ...rest } = make(() => f())\nfunction f() { return rest }",
+    ],
+  ])("removes a dead declarator whose rest is read by %s", (_, source) => {
+    expect(transform(source, { candidates: "none" })).toBe("")
+  })
+
+  test("keeps the keys of a live rest", () => {
+    let source = "const { a, ...rest } = make(() => rest)\nexport { rest }"
+    expect(transform(source, { candidates: "none" })).toBe(unchanged(source))
+  })
+})
