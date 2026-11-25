@@ -174,7 +174,8 @@ scopes before your visitor runs.
   not keep a value alive, because types are erased before the code runs. The
   types themselves stay, so the output can contain a type that names a removed
   value, such as `type T = typeof schema`. Only a type-only export of a removed
-  value goes with it. Strip types before type-checking the output, or do not
+  value goes with it, and an import that elimination leaves with only type
+  specifiers (`import { type User } from "./db.server"`). Strip types before type-checking the output, or do not
   type-check it.
 - **A dead cycle that your transform cuts stays.** `findReferencedIdentifiers`
   leaves out names that only read each other in a closed cycle, such as `x` and

@@ -131,13 +131,28 @@ export default function (
       if (path.node.specifiers.length === 0) {
         return
       }
+      let removedValue = false
       for (let specifier of path.get("specifiers")) {
         let local = specifier.get("local")
         if (shouldBeRemoved(local)) {
           specifier.remove()
+          removedValue = true
         }
       }
-      if (path.node.specifiers.length === 0) {
+      // An import left with only type specifiers would still load its module
+      // where types are kept as imports (`verbatimModuleSyntax` emits
+      // `import {} from "./db.server"`), so it goes with its last value.
+      const node = path.node
+      if (
+        node.specifiers.length === 0 ||
+        (removedValue &&
+          node.specifiers.every(
+            (specifier) =>
+              node.importKind === "type" ||
+              (specifier.type === "ImportSpecifier" &&
+                specifier.importKind === "type"),
+          ))
+      ) {
         path.remove()
       }
       return

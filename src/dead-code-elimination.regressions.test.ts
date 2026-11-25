@@ -775,6 +775,26 @@ describe("calls in functions", () => {
 })
 
 describe("values used only in types", () => {
+  test("removes an import left with only type specifiers", () => {
+    let source = ts`
+      import { type User, getUser } from "./db.server"
+      export const loader = async (): Promise<User> => getUser()
+      export default function Route() { return 1 }
+    `
+    let output = transform(source, { strip: ["loader"], typescript: true })
+    expect(output).not.toContain("db.server")
+  })
+
+  test("keeps an import that had only type specifiers to begin with", () => {
+    let source = ts`
+      import { type User } from "./db.server"
+      export const user: User = load()
+    `
+    expect(transform(source, { typescript: true })).toBe(
+      unchanged(source, true),
+    )
+  })
+
   test.each([
     ["typeof in a type alias", "type Input = z.infer<typeof schema>"],
     ["as typeof", "export const x = 0 as unknown as typeof schema"],
