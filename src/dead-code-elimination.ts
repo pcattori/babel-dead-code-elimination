@@ -7,7 +7,6 @@ import {
 } from "./babel-esm"
 import * as Pattern from "./pattern"
 import { forEachMatchingPath, getProgramPath } from "./walk"
-import { unexpected } from "./errors"
 import {
   crawlProgram,
   isAttached,
@@ -148,76 +147,29 @@ export default function (
           if (!shouldBeRemoved(variable)) continue
           if (callsInFunction(path)) break
           markEmptied(variable)
-
-          let parent = variable.parentPath
-
-          if (parent.isObjectProperty()) {
-            willRemove()
-            parent.remove()
-            continue
-          }
-
-          if (parent.isArrayPattern()) {
-            willRemove()
-            parent.node.elements[variable.key as number] = null
-            continue
-          }
-
-          if (parent.isAssignmentPattern()) {
-            if (t.isObjectProperty(parent.parent)) {
-              willRemove()
-              parent.parentPath?.remove()
-              continue
-            }
-            if (t.isArrayPattern(parent.parent)) {
-              willRemove()
-              parent.parent.elements[parent.key as number] = null
-              continue
-            }
-            throw unexpected(parent)
-          }
-
-          if (parent.isRestElement()) {
-            willRemove()
-            reshapedPattern()
-            parent.remove()
-            continue
-          }
-
-          throw unexpected(parent)
+          willRemove()
+          // Keys that a removed rest no longer filters out may now go.
+          if (variable.parentPath.isRestElement()) reshapedPattern()
+          Pattern.remove(variable)
         }
       }
       return
     }
-    if (path.isObjectPattern()) {
-      if (path.node.properties.length !== 0) {
-        return
-      }
+    if (path.isObjectPattern() || path.isArrayPattern()) {
+      const node = path.node
+      const isEmpty = t.isObjectPattern(node)
+        ? node.properties.length === 0
+        : node.elements.every((element) => element === null)
+      if (!isEmpty) return
       let declarator = Pattern.findDeclarator(path)
       if (
         declarator &&
-        !Pattern.isRestFiltered(declarator.node.id, path.node) &&
+        !Pattern.isRestFiltered(declarator.node.id, node) &&
         !callsInFunction(declarator) &&
-        (!hasCandidates || emptied.has(path.node))
+        (!hasCandidates || emptied.has(node))
       ) {
         willRemove()
-        if (!t.isVariableDeclarator(path.parent)) reshapedPattern()
-        Pattern.remove(path)
-      }
-      return
-    }
-    if (path.isArrayPattern()) {
-      if (!path.node.elements.every((element) => element === null)) {
-        return
-      }
-      let declarator = Pattern.findDeclarator(path)
-      if (
-        declarator &&
-        !Pattern.isRestFiltered(declarator.node.id, path.node) &&
-        !callsInFunction(declarator) &&
-        (!hasCandidates || emptied.has(path.node))
-      ) {
-        willRemove()
+        // Removing a nested pattern can empty the pattern that holds it.
         if (!t.isVariableDeclarator(path.parent)) reshapedPattern()
         Pattern.remove(path)
       }

@@ -103,7 +103,14 @@ export function findDeclarator(
   return null
 }
 
-export function remove(path: NodePath<t.ObjectPattern | t.ArrayPattern>) {
+/**
+ * Removes a variable or an emptied pattern from the declaration pattern that
+ * holds it: its property, its array element (leaving a hole, so later
+ * elements keep their positions), or its rest element.
+ */
+export function remove(
+  path: NodePath<t.Identifier | t.ObjectPattern | t.ArrayPattern>,
+) {
   let parent = path.parentPath
   if (parent.isVariableDeclarator()) {
     return parent.remove()
