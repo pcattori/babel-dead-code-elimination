@@ -1,5 +1,4 @@
 import { t, type NodePath, type Babel, type Binding } from "./babel-esm"
-import { isRestFiltered } from "./pattern"
 
 /**
  * Finds bindings that nothing elimination keeps can reach, through references
@@ -41,8 +40,8 @@ export default function findRemovableBindings(
  * cycles (a self-recursive function counts), and bindings nothing references
  * at all. Reference collection leaves out the referenced ones among these,
  * so a binding read only by other dead code stays a candidate that a later
- * transform can make unreferenced. Keys filtered out of an object rest count
- * as kept here, as they always did for reference collection. As in
+ * transform can make unreferenced. A key filtered out of an object rest is
+ * kept by the rest, so it counts as used only while the rest does. As in
  * elimination, a default or computed key is read by its own element and a
  * reassignment counts as a reference from the code doing it, so an element
  * that only its own default reads, or a variable that only code it keeps
@@ -52,7 +51,7 @@ export function findDeadCycleBindings(
   programPath: NodePath<Babel.Program>,
 ): Set<Binding> {
   const removable = new Set<Binding>()
-  const graph = buildReferenceGraph(programPath, isRestFilteredBinding)
+  const graph = buildReferenceGraph(programPath)
   if (!graph) return removable
   const { bindings, refs, excluded } = graph
   const n = bindings.length
@@ -190,6 +189,23 @@ function buildReferenceGraph(
     refs[i] = null
   }
 
+  // Reference collection: a kept rest keeps the keys listed before it, which
+  // count as used only while the rest does. Elimination keeps those keys
+  // itself while the rest stays.
+  if (!forElimination) {
+    const byIdentifier = new Map<Babel.Node, number>()
+    for (let i = 0; i < n; i++) byIdentifier.set(allBindings[i]!.identifier, i)
+    for (let i = 0; i < n; i++) {
+      const declarator = allBindings[i]!.path.node
+      if (!t.isVariableDeclarator(declarator)) continue
+      const rests = filteringRests(declarator.id, allBindings[i]!.identifier)
+      for (const rest of rests ?? []) {
+        const r = byIdentifier.get(rest)
+        if (r !== undefined) (refs[r] ??= []).push(i)
+      }
+    }
+  }
+
   // Mark bindings as excluded (not removable) if they have external refs or
   // reassignments, or are kept. A program-level loop head is a `var`, whose
   // loop assignment Babel records as a reassignment by its own declarator.
@@ -243,8 +259,9 @@ function buildReferenceGraph(
       const containerRefs = refs[containerIdx]
       if (!containerRefs) {
         refs[containerIdx] = [target]
-        // Sites of one target are processed together, so any duplicate edge
-        // is the last one appended to its containing declaration.
+        // Sites of one target are processed together, so a duplicate edge
+        // from a site is the last one appended to its containing declaration
+        // (a rest's edges to its keys may repeat one; a repeat is harmless).
       } else if (containerRefs[containerRefs.length - 1] !== target) {
         containerRefs.push(target)
       }
@@ -380,14 +397,39 @@ function isRemovableDeclaration(
   return false
 }
 
-// Elimination keeps object pattern properties that are filtered out of a rest
-// element, even when they are unused.
-function isRestFilteredBinding(binding: Binding): boolean {
-  const declarator = binding.path.node
-  return (
-    t.isVariableDeclarator(declarator) &&
-    isRestFiltered(declarator.id, binding.identifier)
-  )
+/**
+ * The rest arguments of the object patterns in `node` that filter `target`
+ * out (`{ a, ...rest }` for `a`), or undefined when `target` is not in `node`.
+ */
+function filteringRests(
+  node: Babel.Node | null | undefined,
+  target: Babel.Node,
+  rests: Babel.Node[] = [],
+): Babel.Node[] | undefined {
+  if (!node) return undefined
+  if (node === target) return rests
+  if (t.isObjectPattern(node)) {
+    const last = node.properties.at(-1)
+    const inner = t.isRestElement(last) ? [...rests, last.argument] : rests
+    for (const property of node.properties) {
+      const result = t.isRestElement(property)
+        ? filteringRests(property.argument, target, rests)
+        : filteringRests(property.value, target, inner)
+      if (result) return result
+    }
+    return undefined
+  }
+  if (t.isArrayPattern(node)) {
+    for (const element of node.elements) {
+      const result = filteringRests(element, target, rests)
+      if (result) return result
+    }
+    return undefined
+  }
+  if (t.isAssignmentPattern(node))
+    return filteringRests(node.left, target, rests)
+  if (t.isRestElement(node)) return filteringRests(node.argument, target, rests)
+  return undefined
 }
 
 // Nodes whose child names a value only in a type: `typeof x`, `T<x.y>`,

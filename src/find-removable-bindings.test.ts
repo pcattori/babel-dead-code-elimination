@@ -335,8 +335,13 @@ test.each([
     ["a", "b"],
   ],
   [
-    "a dead object rest declarator in a cycle",
+    "a dead object rest declarator in a cycle, whose keys only the rest keeps",
     "const { a, ...rest } = make(() => f())\nfunction f() { return [a, rest] }",
+    ["a", "f", "rest"],
+  ],
+  [
+    "a used rest keeps the key before it",
+    "const { a, ...rest } = make(() => f())\nfunction f() { return [a, rest] }\nuse(rest)",
     [],
   ],
 ])("dead cycles: %s", (_, source, expected) => {
