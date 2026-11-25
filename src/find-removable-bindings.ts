@@ -25,13 +25,13 @@ export default function findRemovableBindings(
 }
 
 /**
- * Finds the bindings of closed dead cycles: strongly connected components of
- * bindings that nothing kept reaches and that no binding outside the
- * component references (a self-recursive function counts). Reference
- * collection leaves exactly these out, so a binding read only by other dead
- * code stays a candidate that a later transform can make unreferenced. Keys
- * filtered out of an object rest count as kept here, as they always did for
- * reference collection.
+ * Finds the bindings that nothing kept reaches and that no binding outside
+ * their strongly connected component references: the members of closed dead
+ * cycles (a self-recursive function counts), and bindings nothing references
+ * at all. Reference collection leaves out the referenced ones among these,
+ * so a binding read only by other dead code stays a candidate that a later
+ * transform can make unreferenced. Keys filtered out of an object rest count
+ * as kept here, as they always did for reference collection.
  */
 export function findDeadCycleBindings(
   programPath: NodePath<Babel.Program>,
@@ -123,10 +123,7 @@ export function findDeadCycleBindings(
     // Removable only if no binding outside the SCC references it. The
     // referencing binding may be one that elimination keeps.
     if (hasIncoming[compId]) continue
-    const comp = sccs[compId]!
-    // SCC with one binding: only a cycle if it references itself (e.g. recursive fn)
-    if (comp.length === 1 && !refs[comp[0]!]?.includes(comp[0]!)) continue
-    for (const idx of comp) removable.add(bindings[idx]!)
+    for (const idx of sccs[compId]!) removable.add(bindings[idx]!)
   }
   return removable
 }
@@ -159,16 +156,16 @@ function buildReferenceGraph(
   const pathNodeToIdx = new Map<Babel.Node, number[]>()
   const refs: (number[] | null)[] = new Array(n)
   for (let i = 0; i < n; i++) {
-    const node = allBindings[i]!.path?.node
-    if (node) {
-      const indices = pathNodeToIdx.get(node)
-      if (indices) indices.push(i)
-      else pathNodeToIdx.set(node, [i])
-    }
+    const node = allBindings[i]!.path.node
+    const indices = pathNodeToIdx.get(node)
+    if (indices) indices.push(i)
+    else pathNodeToIdx.set(node, [i])
     refs[i] = null
   }
 
-  // Mark bindings as excluded (not removable) if they have external refs, reassignments, are loop iterators, or are kept
+  // Mark bindings as excluded (not removable) if they have external refs,
+  // reassignments, or are kept. A program-level loop head is a `var`, whose
+  // loop assignment Babel records as a reassignment.
   const excluded = new Uint8Array(n)
   // excluded bindings whose refs need to be excluded too
   const exclusionQueue: number[] = []
@@ -180,7 +177,6 @@ function buildReferenceGraph(
 
     if (
       binding.constantViolations.length > 0 ||
-      isLoopIteratorBinding(binding) ||
       !isRemovableDeclaration(binding) ||
       isKept?.(binding)
     ) {
@@ -212,7 +208,7 @@ function buildReferenceGraph(
             containerRefs.push(i)
           }
         }
-      } else if (!excluded[i]) {
+      } else {
         excluded[i] = 1
         candidateCount--
         exclusionQueue.push(i)
@@ -288,24 +284,23 @@ const TYPE_REFERENCE_PARENTS = new Set([
  * the types and never read the value.
  */
 function isTypeOnlyReference(path: NodePath): boolean {
+  // A reference is never the Program, so it always has a parent.
+  let parent: NodePath = path.parentPath!
   if (
     path.key === "id" &&
-    (path.parentPath?.isTSTypeAliasDeclaration() ||
-      path.parentPath?.isTSInterfaceDeclaration() ||
-      path.parentPath?.isTSDeclareFunction()) === true
+    (parent.isTSTypeAliasDeclaration() ||
+      parent.isTSInterfaceDeclaration() ||
+      parent.isTSDeclareFunction())
   ) {
     return true
   }
-  if (path.parentPath?.isExportSpecifier()) {
-    return isTypeOnlyExport(path.parentPath)
-  }
+  if (parent.isExportSpecifier()) return isTypeOnlyExport(parent)
   // Climb the dotted name the reference starts: `x.y` in a type is a
   // qualified name, and in a computed key a member expression.
-  let parent = path.parentPath
-  while (parent?.isTSQualifiedName() || parent?.isMemberExpression()) {
-    parent = parent.parentPath
+  while (parent.isTSQualifiedName() || parent.isMemberExpression()) {
+    parent = parent.parentPath!
   }
-  return parent !== null && TYPE_REFERENCE_PARENTS.has(parent.type)
+  return TYPE_REFERENCE_PARENTS.has(parent.type)
 }
 
 /** Whether an export specifier exports only a type: `export type { s }`, `export { type s }`. */

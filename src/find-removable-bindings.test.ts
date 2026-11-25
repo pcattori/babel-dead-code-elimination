@@ -313,12 +313,12 @@ test.each([
   [
     "a chain read only by dead code",
     "function a() { return b() }\nfunction b() { return c() }\nfunction c() { return 1 }",
-    [],
+    ["a"],
   ],
   [
     "a cycle read by dead code",
     "function a() { return b() }\nfunction b() { return a() }\nfunction c() { return a() }",
-    [],
+    ["c"],
   ],
   [
     "a closed cycle and what it reads",
