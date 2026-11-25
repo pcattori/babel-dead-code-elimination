@@ -165,6 +165,16 @@ reference-graph analysis. The optional `scopeIsFresh` flag follows the same
 contract as `findReferencedIdentifiers`; otherwise the collector refreshes
 scopes before your visitor runs.
 
+## Limitations
+
+- **`eval` is not supported.** Code that a direct `eval` reads is invisible to
+  the analysis, so `const x = 1; eval("x")` removes `x`.
+- **Types are not cleaned up.** References inside TypeScript types (`typeof x`,
+  `x as typeof schema`, `implements X`) do not keep a value alive, because types
+  are erased before the code runs. The types themselves stay, so the output can
+  contain a type that names a removed value, such as `type T = typeof schema`.
+  Strip types before type-checking the output, or do not type-check it.
+
 ## Prior art
 
 Credit to [Jason Miller](https://github.com/developit) for the initial implementation.
