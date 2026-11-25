@@ -82,18 +82,13 @@ export default function (
 
     const binding = getDeclaredBinding(ident)
 
-    // A `var` redeclaration goes with the declaration that made the binding.
-    if (
-      binding &&
-      redeclarations(binding).some((r) => r.node.id === ident.node)
-    )
-      return false
-
     // Only remove a declaration whose own binding is known. Removing a sole
     // declarator also removes its declaration, and Babel deletes the name
     // from scope for both, so the second deletion can drop a same-named
     // binding of an enclosing scope until the bindings are refreshed. Such a
-    // declaration is decided in another pass.
+    // declaration is decided in another pass. A `var` redeclaration is not
+    // its binding's own declaration either: it goes with the declaration
+    // that made the binding.
     if (binding?.identifier !== ident.node) {
       needsAnotherPass = true
       return false
