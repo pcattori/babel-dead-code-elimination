@@ -198,27 +198,39 @@ export default function (
     // is a class declaration.
     const classPath = path as NodePath<Babel.ClassDeclaration>
     let id = classPath.get("id")
-    if (
-      id.isIdentifier() &&
-      shouldBeRemoved(id) &&
-      !hasDefinitionSideEffects(classPath)
-    ) {
+    if (id.isIdentifier() && shouldBeRemoved(id) && !runsCode(classPath)) {
       willRemove()
       classPath.remove()
     }
   }
 
+  // Whether defining a class runs code is decided once, before anything is
+  // removed: once a name the class reads is removed, Babel would judge the
+  // read as one of a global, which may throw.
+  const classRunsCode = new Map<Babel.Node, boolean>()
+  const runsCode = (path: NodePath<Babel.ClassDeclaration>): boolean => {
+    let result = classRunsCode.get(path.node)
+    if (result === undefined) {
+      result = hasDefinitionSideEffects(path)
+      classRunsCode.set(path.node, result)
+    }
+    return result
+  }
+
   const crawl = mustCrawlProgram(ast)
   programPath = getProgramPath(ast)
   if (crawl) crawlProgram(programPath)
-  removableBindings = findRemovableBindings(programPath, isKept)
+  removableBindings = findRemovableBindings(programPath, isKept, runsCode)
   const typeExports = findTypeOnlyExports(programPath)
   // Collect the declaration and pattern paths in source order without a Babel
   // traversal (see walk.ts).
   forEachMatchingPath(
     programPath,
     (node) => ELIMINATION_TYPES.has(node.type),
-    (path) => paths.push(path),
+    (path) => {
+      paths.push(path)
+      if (path.isClassDeclaration()) runsCode(path)
+    },
   )
 
   // Elimination only removes nodes. Revisit the declaration paths in source
@@ -236,7 +248,7 @@ export default function (
     const lostReference = refreshBindings(snapshot!)
     if (!needsAnotherPass && !lostReference) break
     needsAnotherPass = false
-    removableBindings = findRemovableBindings(programPath, isKept)
+    removableBindings = findRemovableBindings(programPath, isKept, runsCode)
   }
 
   // A type-only export keeps no value alive, but once the value is gone it

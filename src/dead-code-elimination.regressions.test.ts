@@ -607,6 +607,36 @@ describe("missed eliminations", () => {
 
 describe("definition side effects", () => {
   test.each([
+    ["a static field", "class C { static x = cfg }"],
+    ["a computed method key", "class C { [cfg]() {} }"],
+    ["a static computed key", "class C { static [cfg] = 1 }"],
+  ])("removes an unused class and the module name %s reads", (_, cls) => {
+    for (let declaration of [
+      "const cfg = mk()",
+      'import { cfg } from "./config.server"',
+    ]) {
+      let source = `${declaration}\n${cls}\nexport const z = 1`
+      for (let candidates of ["none", "references"] as const) {
+        let output = transform(source, {
+          candidates:
+            candidates === "none"
+              ? "none"
+              : (ast) => {
+                  let set = new Set<NodePath<Babel.Identifier>>()
+                  traverse(ast, {
+                    Identifier(path) {
+                      if (path.isBindingIdentifier()) set.add(path)
+                    },
+                  })
+                  return set
+                },
+        })
+        expect(output).toBe("export const z = 1;")
+      }
+    }
+  })
+
+  test.each([
     [
       "class decorator",
       "@customElement('x-foo') class XFoo extends LitElement {}",

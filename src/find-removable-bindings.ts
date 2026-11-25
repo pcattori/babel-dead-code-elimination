@@ -7,12 +7,15 @@ import { isRestFiltered } from "./pattern"
  * @param isKept - Bindings that elimination keeps regardless of references.
  * Given exactly when elimination has candidates, which also keep every
  * pattern that was empty to begin with.
+ * @param classRunsCode - Whether defining a class runs code. Elimination
+ * decides it before removing anything (see hasDefinitionSideEffects).
  */
 export default function findRemovableBindings(
   programPath: NodePath<Babel.Program>,
   isKept?: (binding: Binding) => boolean,
+  classRunsCode: ClassRunsCode = hasDefinitionSideEffects,
 ): Set<Binding> {
-  const graph = buildReferenceGraph(programPath, isKept, true)
+  const graph = buildReferenceGraph(programPath, isKept, true, classRunsCode)
   const removable = new Set<Binding>()
   if (!graph) return removable
   // Every binding left is reachable from nothing that elimination keeps, so it
@@ -159,6 +162,7 @@ function buildReferenceGraph(
   programPath: NodePath<Babel.Program>,
   isKept?: (binding: Binding) => boolean,
   forElimination = false,
+  classRunsCode: ClassRunsCode = hasDefinitionSideEffects,
 ):
   | { bindings: Binding[]; refs: (number[] | null)[]; excluded: Uint8Array }
   | undefined {
@@ -252,7 +256,7 @@ function buildReferenceGraph(
     const binding = allBindings[i]!
 
     if (
-      !isRemovableDeclaration(binding) ||
+      !isRemovableDeclaration(binding, classRunsCode) ||
       isKept?.(binding) ||
       (binding.constantViolations.length > 0 && isLoopIteratorBinding(binding))
     ) {
@@ -359,12 +363,13 @@ const contains = (pattern: Babel.Node, identifier: Babel.Identifier) =>
 
 // Elimination only removes these declarations. Any other binding (such as a
 // TypeScript enum) is kept and keeps everything it references alive.
-function isRemovableDeclaration(binding: Binding): boolean {
+function isRemovableDeclaration(
+  binding: Binding,
+  classRunsCode: ClassRunsCode,
+): boolean {
   switch (binding.path.type) {
     case "ClassDeclaration":
-      return !hasDefinitionSideEffects(
-        binding.path as NodePath<Babel.ClassDeclaration>,
-      )
+      return !classRunsCode(binding.path as NodePath<Babel.ClassDeclaration>)
     case "VariableDeclarator":
     case "FunctionDeclaration":
     case "ImportSpecifier":
@@ -441,6 +446,8 @@ export function isReferenced(binding: Binding): boolean {
     binding.referencePaths.some((path) => !isTypeOnlyReference(path))
   )
 }
+
+export type ClassRunsCode = (path: NodePath<Babel.ClassDeclaration>) => boolean
 
 /**
  * Whether defining the class runs code whose effects removal would drop:
