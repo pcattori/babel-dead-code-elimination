@@ -742,6 +742,17 @@ describe("calls in functions", () => {
     ["a conditional call", "const handle = ready ? register() : 0", "handle"],
     ["an array of calls", "const handle = [register()]", "handle"],
     ["a call with a fallback", "const handle = register() ?? 0", "handle"],
+    ["a call in a default", "const { handle = useId() } = props", "handle"],
+    [
+      "a call in a computed key",
+      "const { [useKey()]: handle } = props",
+      "handle",
+    ],
+    [
+      "a call in an array default",
+      "const [handle = useId()] = props",
+      "handle",
+    ],
     [
       "a sequence ending in a call",
       "const handle = (log(), register())",

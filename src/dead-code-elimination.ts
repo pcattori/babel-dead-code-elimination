@@ -323,16 +323,21 @@ const isSameNamedType = (path: NodePath): boolean =>
     path.parent.type === "TSInterfaceDeclaration")
 
 /**
- * Whether a declarator inside a function evaluates a call when its initializer
- * runs, directly or nested (`useId()`, `useCtx().value`, `c ? useA() : 0`,
- * `[useA()]`), but not in a nested function (`() => useA()` runs nothing).
- * Such calls run on every invocation, and some must run in the same order in
- * every build: removing an unused `const id = useId()` from a component only in
- * the server build shifts React's hook-based ids. Declarations like these are
- * kept even when their bindings are unused.
+ * Whether a declarator inside a function evaluates a call when it runs, in its
+ * initializer or in its pattern's defaults and computed keys, directly or
+ * nested (`useId()`, `useCtx().value`, `c ? useA() : 0`, `[useA()]`,
+ * `{ id = useId() }`, `{ [useKey()]: a }`), but not in a nested function
+ * (`() => useA()` runs nothing). Such calls run on every invocation, and some
+ * must run in the same order in every build: removing an unused
+ * `const id = useId()` from a component only in the server build shifts
+ * React's hook-based ids. Declarations like these are kept even when their
+ * bindings are unused.
  */
 function callsInFunction(path: NodePath<Babel.VariableDeclarator>): boolean {
-  return path.getFunctionParent() !== null && evaluatesCall(path.node.init)
+  return (
+    path.getFunctionParent() !== null &&
+    (evaluatesCall(path.node.init) || evaluatesCall(path.node.id))
+  )
 }
 
 function evaluatesCall(node: Babel.Node | null | undefined): boolean {
