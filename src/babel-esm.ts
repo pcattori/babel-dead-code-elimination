@@ -1,6 +1,6 @@
 export { types as Babel } from "@babel/core"
 export { parse, type ParseResult } from "@babel/parser"
-export type { Node, NodePath, Binding } from "@babel/traverse"
+export type { Node, NodePath, Binding, Scope } from "@babel/traverse"
 export * as t from "@babel/types"
 
 // Avoid CJS-ESM default export interop differences across different tools

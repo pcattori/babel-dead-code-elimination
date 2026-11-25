@@ -23,14 +23,31 @@ type ScopeOptions = {
 
 // A name is referenced when something reads it, unless only its own closed
 // dead cycle does: nothing a transform removes can make such a cycle unused.
+// Cycles are found within each scope, so locals that only read each other
+// count as unused like such module declarations (decision R2-D5).
 function addIfReferenced(
   ident: IdentifierPath,
-  deadCycles: Set<Binding>,
+  deadCycles: DeadCycles,
   referenced: Set<IdentifierPath>,
 ): void {
   const binding = getDeclaredBinding(ident)
-  if (binding && !deadCycles.has(binding) && isReferenced(binding)) {
+  if (binding && isReferenced(binding) && !deadCycles(binding)) {
     referenced.add(ident)
+  }
+}
+
+type DeadCycles = (binding: Binding) => boolean
+
+/** Whether a binding is in a closed dead cycle of its scope, scope by scope. */
+function deadCyclesByScope(): DeadCycles {
+  const byScope = new Map<Binding["scope"], Set<Binding>>()
+  return (binding) => {
+    let cycles = byScope.get(binding.scope)
+    if (!cycles) {
+      cycles = findDeadCycleBindings(binding.scope.path)
+      byScope.set(binding.scope, cycles)
+    }
+    return cycles.has(binding)
   }
 }
 
@@ -59,7 +76,7 @@ export default function (
   if (crawl) {
     crawlProgram(programPath)
   }
-  const deadCycles = findDeadCycleBindings(programPath)
+  const deadCycles = deadCyclesByScope()
   // Declarations are found without a second Babel traversal (see walk.ts).
   forEachMatchingPath(
     programPath,
@@ -103,7 +120,7 @@ export function collectReferencedIdentifiers(
   traverse(ast, mergedVisitor)
   return () => {
     const referenced = new Set<IdentifierPath>()
-    const deadCycles = findDeadCycleBindings(programPath)
+    const deadCycles = deadCyclesByScope()
     for (const ident of identifiers) {
       addIfReferenced(ident, deadCycles, referenced)
     }

@@ -4,6 +4,7 @@ import {
   type Babel,
   type ParseResult,
   type Binding,
+  type Scope,
 } from "./babel-esm"
 import * as Pattern from "./pattern"
 import { forEachMatchingPath, getProgramPath } from "./walk"
@@ -16,6 +17,7 @@ import {
   type BindingSnapshot,
 } from "./scope"
 import findRemovableBindings, {
+  callsInFunction,
   getDeclaredBinding,
   hasDefinitionSideEffects,
   isLoopIteratorBinding,
@@ -44,8 +46,10 @@ export default function (
   let programPath!: NodePath<Babel.Program>
   const paths: Array<NodePath> = []
 
-  // Bindings that nothing elimination keeps reaches
+  // Bindings of the program that nothing elimination keeps reaches, and those
+  // of other scopes, found when a pass first meets one of their declarations
   let removableBindings: Set<Binding>
+  const removableLocals = new Map<Scope, Set<Binding>>()
   let snapshot: BindingSnapshot | undefined
 
   // Candidates are matched by node: a transform that rebuilds a declaration
@@ -96,7 +100,16 @@ export default function (
     }
 
     // If nothing that elimination keeps reaches the binding, allow removal
-    if (removableBindings.has(binding)) return true
+    const scope = binding.scope
+    let removable = removableBindings
+    if (scope !== programPath.scope) {
+      removable = removableLocals.get(scope)!
+      if (!removable) {
+        removable = findRemovableBindings(scope.path, isKept, runsCode)
+        removableLocals.set(scope, removable)
+      }
+    }
+    if (removable.has(binding)) return true
 
     if (isReferenced(binding)) return false
 
@@ -278,6 +291,7 @@ export default function (
     if (!needsAnotherPass && !lostReference) break
     needsAnotherPass = false
     removableBindings = findRemovableBindings(programPath, isKept, runsCode)
+    removableLocals.clear()
   }
 
   // A type-only export keeps no value alive, but once the value is gone it
@@ -321,44 +335,3 @@ const isSameNamedType = (path: NodePath): boolean =>
   path.key === "id" &&
   (path.parent.type === "TSTypeAliasDeclaration" ||
     path.parent.type === "TSInterfaceDeclaration")
-
-/**
- * Whether a declarator inside a function evaluates a call when it runs, in its
- * initializer or in its pattern's defaults and computed keys, directly or
- * nested (`useId()`, `useCtx().value`, `c ? useA() : 0`, `[useA()]`,
- * `{ id = useId() }`, `{ [useKey()]: a }`), but not in a nested function
- * (`() => useA()` runs nothing). Such calls run on every invocation, and some
- * must run in the same order in every build: removing an unused
- * `const id = useId()` from a component only in the server build shifts
- * React's hook-based ids. Declarations like these are kept even when their
- * bindings are unused.
- */
-function callsInFunction(path: NodePath<Babel.VariableDeclarator>): boolean {
-  return (
-    path.getFunctionParent() !== null &&
-    (evaluatesCall(path.node.init) || evaluatesCall(path.node.id))
-  )
-}
-
-function evaluatesCall(node: Babel.Node | null | undefined): boolean {
-  if (!node || t.isFunction(node)) return false
-  if (
-    t.isCallExpression(node) ||
-    t.isOptionalCallExpression(node) ||
-    t.isNewExpression(node) ||
-    t.isTaggedTemplateExpression(node)
-  ) {
-    return true
-  }
-  for (const key of t.VISITOR_KEYS[node.type]!) {
-    const child = (node as unknown as Record<string, unknown>)[key]
-    if (
-      Array.isArray(child)
-        ? child.some((element) => evaluatesCall(element as Babel.Node | null))
-        : evaluatesCall(child as Babel.Node | null)
-    ) {
-      return true
-    }
-  }
-  return false
-}

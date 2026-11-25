@@ -176,3 +176,16 @@ test("a variable reassigned only by code that it keeps is not referenced", () =>
   `
   expect(findReferencedNames(source)).toStrictEqual([])
 })
+
+test("locals that only read each other are not referenced", () => {
+  let source = dedent`
+    export function f() {
+      const a = () => b()
+      const b = () => a()
+      const c = () => c()
+      const d = () => 1
+      return d
+    }
+  `
+  expect(findReferencedNames(source)).toStrictEqual(["f", "d"])
+})

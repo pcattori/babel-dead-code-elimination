@@ -1,8 +1,11 @@
 import { t, type NodePath, type Babel, type Binding } from "./babel-esm"
 
 /**
- * Finds bindings that nothing elimination keeps can reach, through references
- * inside declarations.
+ * Finds the bindings of a scope that nothing elimination keeps can reach,
+ * through references inside the scope's declarations. The scope is the
+ * program's, a function's or a block's: locals that only read each other are
+ * as dead as such module declarations (decision R2-D5).
+ * @param scopePath - A path whose scope is the one to analyze.
  * @param isKept - Bindings that elimination keeps regardless of references.
  * Given exactly when elimination has candidates, which also keep every
  * pattern that was empty to begin with.
@@ -10,11 +13,11 @@ import { t, type NodePath, type Babel, type Binding } from "./babel-esm"
  * decides it before removing anything (see hasDefinitionSideEffects).
  */
 export default function findRemovableBindings(
-  programPath: NodePath<Babel.Program>,
+  scopePath: NodePath,
   isKept?: (binding: Binding) => boolean,
   classRunsCode: ClassRunsCode = hasDefinitionSideEffects,
 ): Set<Binding> {
-  const graph = buildReferenceGraph(programPath, isKept, true, classRunsCode)
+  const graph = buildReferenceGraph(scopePath, isKept, true, classRunsCode)
   const removable = new Set<Binding>()
   if (!graph) return removable
   // Every binding left is reachable from nothing that elimination keeps, so it
@@ -47,11 +50,9 @@ export default function findRemovableBindings(
  * that only its own default reads, or a variable that only code it keeps
  * reassigns, is in a closed cycle.
  */
-export function findDeadCycleBindings(
-  programPath: NodePath<Babel.Program>,
-): Set<Binding> {
+export function findDeadCycleBindings(scopePath: NodePath): Set<Binding> {
   const removable = new Set<Binding>()
-  const graph = buildReferenceGraph(programPath)
+  const graph = buildReferenceGraph(scopePath)
   if (!graph) return removable
   const { bindings, refs, excluded } = graph
   const n = bindings.length
@@ -158,7 +159,7 @@ export function findDeadCycleBindings(
  * it always did.
  */
 function buildReferenceGraph(
-  programPath: NodePath<Babel.Program>,
+  scopePath: NodePath,
   isKept?: (binding: Binding) => boolean,
   forElimination = false,
   classRunsCode: ClassRunsCode = hasDefinitionSideEffects,
@@ -167,7 +168,7 @@ function buildReferenceGraph(
   | undefined {
   // Babel keeps bindings in a dictionary-mode object, where Object.keys with
   // indexed reads is several times faster than Object.values.
-  const bindingsByName = programPath.scope.bindings
+  const bindingsByName = scopePath.scope.bindings
   const names = Object.keys(bindingsByName)
   const allBindings = new Array<Binding>(names.length)
   for (let i = 0; i < names.length; i++) {
@@ -211,8 +212,8 @@ function buildReferenceGraph(
   }
 
   // Mark bindings as excluded (not removable) if they have external refs or
-  // reassignments, or are kept. A program-level loop head is a `var`, whose
-  // loop assignment Babel records as a reassignment by its own declarator.
+  // reassignments, or are kept: by candidates, as loop heads, or as locals
+  // whose declarator calls something when it runs (see callsInFunction).
   const excluded = new Uint8Array(n)
   // excluded bindings whose refs need to be excluded too
   const exclusionQueue: number[] = []
@@ -279,7 +280,8 @@ function buildReferenceGraph(
     if (
       !isRemovableDeclaration(binding, classRunsCode) ||
       isKept?.(binding) ||
-      (binding.constantViolations.length > 0 && isLoopIteratorBinding(binding))
+      isLoopIteratorBinding(binding) ||
+      (binding.path.isVariableDeclarator() && callsInFunction(binding.path))
     ) {
       excluded[i] = 1
       candidateCount--
@@ -571,6 +573,49 @@ export function isLoopIteratorBinding(binding: Binding): boolean {
       declPath?.key === "left" &&
       (declPath.parent.type === "ForOfStatement" ||
         declPath.parent.type === "ForInStatement")
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Whether a declarator inside a function evaluates a call when it runs, in its
+ * initializer or in its pattern's defaults and computed keys, directly or
+ * nested (`useId()`, `useCtx().value`, `c ? useA() : 0`, `[useA()]`,
+ * `{ id = useId() }`, `{ [useKey()]: a }`), but not in a nested function
+ * (`() => useA()` runs nothing). Such calls run on every invocation, and some
+ * must run in the same order in every build: removing an unused
+ * `const id = useId()` from a component only in the server build shifts
+ * React's hook-based ids. Declarations like these are kept even when their
+ * bindings are unused.
+ */
+export function callsInFunction(
+  path: NodePath<Babel.VariableDeclarator>,
+): boolean {
+  return (
+    path.getFunctionParent() !== null &&
+    (evaluatesCall(path.node.init) || evaluatesCall(path.node.id))
+  )
+}
+
+function evaluatesCall(node: Babel.Node | null | undefined): boolean {
+  if (!node || t.isFunction(node)) return false
+  if (
+    t.isCallExpression(node) ||
+    t.isOptionalCallExpression(node) ||
+    t.isNewExpression(node) ||
+    t.isTaggedTemplateExpression(node)
+  ) {
+    return true
+  }
+  for (const key of t.VISITOR_KEYS[node.type]!) {
+    const child = (node as unknown as Record<string, unknown>)[key]
+    if (
+      Array.isArray(child)
+        ? child.some((element) => evaluatesCall(element as Babel.Node | null))
+        : evaluatesCall(child as Babel.Node | null)
     ) {
       return true
     }

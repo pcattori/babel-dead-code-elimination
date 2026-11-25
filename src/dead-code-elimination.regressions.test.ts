@@ -886,3 +886,29 @@ describe("object rest in a cycle", () => {
     expect(transform(source, { candidates: "none" })).toBe(unchanged(source))
   })
 })
+
+describe("unused cycles inside functions", () => {
+  test.each([
+    [
+      "a function body",
+      "export function f() {\n  const a = () => b();\n  const b = () => a();\n  return 1;\n}",
+      "export function f() {\n  return 1;\n}",
+    ],
+    [
+      "a block",
+      "if (x) {\n  function a() {\n    return b();\n  }\n  function b() {\n    return a();\n  }\n}",
+      "if (x) {}",
+    ],
+  ])(
+    "removes locals that only read each other in %s",
+    (_, source, expected) => {
+      expect(transform(source, { candidates: "none" })).toBe(expected)
+    },
+  )
+
+  test("keeps a local cycle that a kept local reads", () => {
+    let source =
+      "export function f() {\n  const a = () => b();\n  const b = () => a();\n  return a;\n}"
+    expect(transform(source, { candidates: "none" })).toBe(unchanged(source))
+  })
+})
