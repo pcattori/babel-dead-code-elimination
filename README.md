@@ -177,6 +177,11 @@ scopes before your visitor runs.
   value goes with it, and an import that elimination leaves with only type
   specifiers (`import { type User } from "./db.server"`). Strip types before type-checking the output, or do not
   type-check it.
+- **The classic JSX runtime's import is not kept by JSX.** With the classic
+  runtime, `<div />` compiles to `React.createElement("div")`, but before that
+  compilation the module reads `React` nowhere, so `import React from "react"`
+  is removed when only JSX would use it. Run elimination after the JSX
+  transform, use the automatic runtime, or read the import in code.
 - **A dead cycle that your transform cuts stays.** `findReferencedIdentifiers`
   leaves out names that only read each other in a closed cycle, such as `x` and
   `foo` in `const x = createServerFn().handler(() => foo()); const foo = () => x`.
