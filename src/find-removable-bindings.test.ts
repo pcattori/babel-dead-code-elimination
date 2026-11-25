@@ -2,7 +2,21 @@ import { expect, test } from "vitest"
 import dedent from "dedent"
 import { parse } from "@babel/parser"
 import { Babel, traverse, type NodePath } from "./babel-esm"
-import findRemovableBindings from "./find-removable-bindings"
+import findRemovableBindings, {
+  findDeadCycleBindings,
+} from "./find-removable-bindings"
+
+const programPathOf = (source: string): NodePath<Babel.Program> => {
+  let ast = parse(source, { sourceType: "module" })
+  let progPath: NodePath<Babel.Program> | null = null
+  traverse(ast, {
+    Program(path) {
+      progPath = path
+      path.stop()
+    },
+  })
+  return progPath!
+}
 
 const findRemovableNames = (source: string): string[] => {
   let ast = parse(source, { sourceType: "module" })
@@ -293,4 +307,32 @@ test("single unreferenced binding without self-ref -> not removable by SCC", () 
   `
   let names = findRemovableNames(source)
   expect(names).toEqual([])
+})
+
+test.each([
+  [
+    "a chain read only by dead code",
+    "function a() { return b() }\nfunction b() { return c() }\nfunction c() { return 1 }",
+    [],
+  ],
+  [
+    "a cycle read by dead code",
+    "function a() { return b() }\nfunction b() { return a() }\nfunction c() { return a() }",
+    [],
+  ],
+  [
+    "a closed cycle and what it reads",
+    "function a() { b(); c() }\nfunction b() { return a() }\nfunction c() { return 1 }",
+    ["a", "b"],
+  ],
+  [
+    "a dead object rest declarator in a cycle",
+    "const { a, ...rest } = make(() => f())\nfunction f() { return [a, rest] }",
+    [],
+  ],
+])("dead cycles: %s", (_, source, expected) => {
+  let names = Array.from(findDeadCycleBindings(programPathOf(source))).map(
+    (b) => b.identifier.name,
+  )
+  expect(names.sort()).toEqual(expected)
 })

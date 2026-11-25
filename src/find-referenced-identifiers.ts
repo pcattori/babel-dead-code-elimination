@@ -9,7 +9,8 @@ import type { Visitor } from "@babel/traverse"
 import { crawlProgram, mustCrawlProgram } from "./scope"
 import { forEachMatchingPath, getProgramPath } from "./walk"
 import { DECLARATION_TYPES, forEachDeclaredIdentifier } from "./declarations"
-import findRemovableBindings, {
+import {
+  findDeadCycleBindings,
   getDeclaredBinding,
   isReferenced,
 } from "./find-removable-bindings"
@@ -20,13 +21,15 @@ type ScopeOptions = {
   scopeIsFresh?: boolean
 }
 
+// A name is referenced when something reads it, unless only its own closed
+// dead cycle does: nothing a transform removes can make such a cycle unused.
 function addIfReferenced(
   ident: IdentifierPath,
-  removable: Set<Binding>,
+  deadCycles: Set<Binding>,
   referenced: Set<IdentifierPath>,
 ): void {
   const binding = getDeclaredBinding(ident)
-  if (binding && !removable.has(binding) && isReferenced(binding)) {
+  if (binding && !deadCycles.has(binding) && isReferenced(binding)) {
     referenced.add(ident)
   }
 }
@@ -56,14 +59,14 @@ export default function (
   if (crawl) {
     crawlProgram(programPath)
   }
-  const removable = findRemovableBindings(programPath)
+  const deadCycles = findDeadCycleBindings(programPath)
   // Declarations are found without a second Babel traversal (see walk.ts).
   forEachMatchingPath(
     programPath,
     (node) => DECLARATION_TYPES.has(node.type),
     (path) =>
       forEachDeclaredIdentifier(path, (ident) =>
-        addIfReferenced(ident, removable, referenced),
+        addIfReferenced(ident, deadCycles, referenced),
       ),
   )
   return referenced
@@ -100,9 +103,9 @@ export function collectReferencedIdentifiers(
   traverse(ast, mergedVisitor)
   return () => {
     const referenced = new Set<IdentifierPath>()
-    const removable = findRemovableBindings(programPath)
+    const deadCycles = findDeadCycleBindings(programPath)
     for (const ident of identifiers) {
-      addIfReferenced(ident, removable, referenced)
+      addIfReferenced(ident, deadCycles, referenced)
     }
     return referenced
   }

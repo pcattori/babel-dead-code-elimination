@@ -174,6 +174,11 @@ scopes before your visitor runs.
   are erased before the code runs. The types themselves stay, so the output can
   contain a type that names a removed value, such as `type T = typeof schema`.
   Strip types before type-checking the output, or do not type-check it.
+- **A dead cycle that your transform cuts stays.** `findReferencedIdentifiers`
+  leaves out names that only read each other in a closed cycle, such as `x` and
+  `foo` in `const x = createServerFn().handler(() => foo()); const foo = () => x`.
+  If your transform then strips `x`'s handler, `foo` was never a candidate, so
+  `deadCodeElimination(ast, referenced)` keeps it.
 
 ## Prior art
 

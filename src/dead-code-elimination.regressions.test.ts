@@ -301,6 +301,23 @@ describe("crashes", () => {
 })
 
 describe("missed eliminations", () => {
+  test("removes what an unused declaration read before the transform stripped it", () => {
+    let source = ts`
+      import { db } from "./db.server"
+      const x = createServerFn().handler(() => foo())
+      const foo = () => db.query()
+    `
+    let ast = parseModule(source)
+    let referenced = findReferencedIdentifiers(ast)
+    traverse(ast, {
+      CallExpression(path) {
+        if (t.isMemberExpression(path.node.callee)) path.node.arguments = []
+      },
+    })
+    deadCodeElimination(ast, referenced)
+    expect(generate(ast).code).toBe("const x = createServerFn().handler();")
+  })
+
   test("removes a closed three-function cycle", () => {
     let source = ts`
       function serialize(v) { return Array.isArray(v) ? serializeArray(v) : serializeObject(v) }

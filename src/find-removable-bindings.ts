@@ -10,6 +10,138 @@ export default function findRemovableBindings(
   programPath: NodePath<Babel.Program>,
   isKept?: (binding: Binding) => boolean,
 ): Set<Binding> {
+  const graph = buildReferenceGraph(programPath, isKept)
+  const removable = new Set<Binding>()
+  if (!graph) return removable
+  // Every binding left is reachable from nothing that elimination keeps, so it
+  // is dead, whether it forms a cycle or is only referenced by dead code.
+  // Unreferenced ones are removed anyway, so only referenced ones are listed.
+  const { bindings, excluded } = graph
+  for (let i = 0; i < bindings.length; i++) {
+    const binding = bindings[i]!
+    if (!excluded[i] && isReferenced(binding)) removable.add(binding)
+  }
+  return removable
+}
+
+/**
+ * Finds the bindings of closed dead cycles: strongly connected components of
+ * bindings that nothing kept reaches and that no binding outside the
+ * component references (a self-recursive function counts). Reference
+ * collection leaves exactly these out, so a binding read only by other dead
+ * code stays a candidate that a later transform can make unreferenced. Keys
+ * filtered out of an object rest count as kept here, as they always did for
+ * reference collection.
+ */
+export function findDeadCycleBindings(
+  programPath: NodePath<Babel.Program>,
+): Set<Binding> {
+  const removable = new Set<Binding>()
+  const graph = buildReferenceGraph(programPath, isRestFilteredBinding)
+  if (!graph) return removable
+  const { bindings, refs, excluded } = graph
+  const n = bindings.length
+
+  // Tarjan's SCC algorithm finds cycles. Small candidate sets are not
+  // special-cased: hand-written checks missed cycles such as a<->c, b<->c.
+  const indices = new Int32Array(n).fill(-1)
+  const lowlink = new Int32Array(n)
+  const onStack = new Uint8Array(n)
+  const stack: number[] = []
+  const sccs: number[][] = []
+  const sccId = new Int32Array(n).fill(-1)
+  let index = 0
+  // Iterative depth-first search: reference chains can be longer than the
+  // call stack allows. edgeCursor[v] is the next neighbor of v to explore.
+  const callStack: number[] = []
+  const edgeCursor = new Int32Array(n)
+
+  const visit = (v: number): void => {
+    indices[v] = lowlink[v] = index++
+    stack.push(v)
+    onStack[v] = 1
+    callStack.push(v)
+  }
+
+  for (let root = 0; root < n; root++) {
+    if (excluded[root] || indices[root] !== -1) continue
+    visit(root)
+    while (callStack.length > 0) {
+      const v = callStack[callStack.length - 1]!
+      const neighbors = refs[v]
+      const edge = edgeCursor[v]!
+      if (neighbors && edge < neighbors.length) {
+        edgeCursor[v] = edge + 1
+        const w = neighbors[edge]!
+        if (excluded[w]) continue
+        if (indices[w] === -1) {
+          visit(w)
+        } else if (onStack[w]) {
+          if (indices[w]! < lowlink[v]!) lowlink[v] = indices[w]!
+        }
+        continue
+      }
+
+      callStack.pop()
+      const parent = callStack[callStack.length - 1]
+      if (parent !== undefined && lowlink[v]! < lowlink[parent]!) {
+        lowlink[parent] = lowlink[v]!
+      }
+
+      if (lowlink[v] === indices[v]) {
+        const comp: number[] = []
+        let w: number
+        const compId = sccs.length
+        do {
+          w = stack.pop()!
+          onStack[w] = 0
+          sccId[w] = compId
+          comp.push(w)
+        } while (w !== v)
+        sccs.push(comp)
+      }
+    }
+  }
+
+  // Mark SCCs with any incoming edge from outside the SCC (among non-excluded bindings)
+  const hasIncoming = new Uint8Array(sccs.length)
+  for (let src = 0; src < n; src++) {
+    if (excluded[src]) continue
+    const srcId = sccId[src]!
+    const neighbors = refs[src]
+    if (neighbors) {
+      for (const dst of neighbors) {
+        if (excluded[dst]) continue
+        const dstId = sccId[dst]!
+        if (srcId !== dstId) hasIncoming[dstId] = 1
+      }
+    }
+  }
+
+  // Collect removable bindings from closed SCCs (cycles with no external references)
+  for (let compId = 0; compId < sccs.length; compId++) {
+    // Removable only if no binding outside the SCC references it. The
+    // referencing binding may be one that elimination keeps.
+    if (hasIncoming[compId]) continue
+    const comp = sccs[compId]!
+    // SCC with one binding: only a cycle if it references itself (e.g. recursive fn)
+    if (comp.length === 1 && !refs[comp[0]!]?.includes(comp[0]!)) continue
+    for (const idx of comp) removable.add(bindings[idx]!)
+  }
+  return removable
+}
+
+/**
+ * The program's bindings, the references inside each one's declaration, and
+ * which bindings are excluded: kept, read from outside every declaration, or
+ * reached from such a binding. Undefined when every binding is excluded.
+ */
+function buildReferenceGraph(
+  programPath: NodePath<Babel.Program>,
+  isKept?: (binding: Binding) => boolean,
+):
+  | { bindings: Binding[]; refs: (number[] | null)[]; excluded: Uint8Array }
+  | undefined {
   // Babel keeps bindings in a dictionary-mode object, where Object.keys with
   // indexed reads is several times faster than Object.values.
   const bindingsByName = programPath.scope.bindings
@@ -19,9 +151,8 @@ export default function findRemovableBindings(
     allBindings[i] = bindingsByName[names[i]!]!
   }
   const n = allBindings.length
-  if (n === 0) return new Set()
+  if (n === 0) return undefined
 
-  // Build a graph of bindings for reachability
   // if binding `a` is referenced inside binding `b`'s definition, refs[b] contains a
   // Map each declaration node to the bindings it declares for fast lookup when
   // tracing refs. A destructuring declarator declares several bindings.
@@ -122,17 +253,8 @@ export default function findRemovableBindings(
     }
   }
 
-  if (candidateCount === 0) return new Set()
-
-  // Every binding left is reachable from nothing that elimination keeps, so it
-  // is dead, whether it forms a cycle or is only referenced by dead code.
-  // Unreferenced ones are removed anyway, so only referenced ones are listed.
-  const removable = new Set<Binding>()
-  for (let i = 0; i < n; i++) {
-    const binding = allBindings[i]!
-    if (!excluded[i] && isReferenced(binding)) removable.add(binding)
-  }
-  return removable
+  if (candidateCount === 0) return undefined
+  return { bindings: allBindings, refs, excluded }
 }
 
 // Elimination only removes these declarations. Any other binding (such as a

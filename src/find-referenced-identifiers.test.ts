@@ -103,6 +103,17 @@ test("circular references", () => {
   expect(findReferencedNames(source)).toStrictEqual([])
 })
 
+test("names read only by unused declarations stay referenced", () => {
+  // A transform that strips the handler makes `foo` and `db` unused, so
+  // elimination with this set can remove them afterwards.
+  let source = dedent`
+    import { db } from "./db.server"
+    const x = createServerFn().handler(() => foo())
+    const foo = () => db.query()
+  `
+  expect(findReferencedNames(source).sort()).toStrictEqual(["db", "foo"])
+})
+
 test("fresh scopes preserve nested and duplicate declaration identities", () => {
   const ast = parse(
     `
