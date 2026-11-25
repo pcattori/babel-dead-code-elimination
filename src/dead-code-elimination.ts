@@ -21,6 +21,7 @@ import findRemovableBindings, {
   hasDefinitionSideEffects,
   isLoopIteratorBinding,
   isReferenced,
+  isTypeOnlyExport,
 } from "./find-removable-bindings"
 
 const ELIMINATION_TYPES = new Set([
@@ -255,6 +256,7 @@ export default function (
   programPath = getProgramPath(ast)
   if (crawl) crawlProgram(programPath)
   removableBindings = findRemovableBindings(programPath, isKept)
+  const typeExports = findTypeOnlyExports(programPath)
   // Collect the declaration and pattern paths in source order without a Babel
   // traversal (see walk.ts).
   forEachMatchingPath(
@@ -280,7 +282,48 @@ export default function (
     needsAnotherPass = false
     removableBindings = findRemovableBindings(programPath, isKept)
   }
+
+  // A type-only export keeps no value alive, but once the value is gone it
+  // names nothing, which TypeScript parsers reject. It stays while a type of
+  // that name does (`type s = ...` next to `const s`).
+  for (const { specifier, binding } of typeExports) {
+    if (programPath.scope.bindings[binding.identifier.name] === binding)
+      continue
+    if (binding.referencePaths.some(isSameNamedType)) continue
+    const declaration =
+      specifier.parentPath as NodePath<Babel.ExportNamedDeclaration>
+    specifier.remove()
+    if (declaration.node.specifiers.length === 0) declaration.remove()
+  }
 }
+
+/** Top-level type-only export specifiers of local bindings, with their binding. */
+function findTypeOnlyExports(programPath: NodePath<Babel.Program>) {
+  const result: Array<{
+    specifier: NodePath<Babel.ExportSpecifier>
+    binding: Binding
+  }> = []
+  programPath.node.body.forEach((statement, i) => {
+    if (statement.type !== "ExportNamedDeclaration" || statement.source) return
+    if (statement.specifiers.length === 0) return
+    const path = programPath.get(
+      `body.${i}`,
+    ) as NodePath<Babel.ExportNamedDeclaration>
+    for (const specifier of path.get("specifiers")) {
+      if (!specifier.isExportSpecifier() || !isTypeOnlyExport(specifier))
+        continue
+      const binding = programPath.scope.bindings[specifier.node.local.name]
+      if (binding) result.push({ specifier, binding })
+    }
+  })
+  return result
+}
+
+/** Whether a reference is the name of a same-named type alias or interface. */
+const isSameNamedType = (path: NodePath): boolean =>
+  path.key === "id" &&
+  (path.parentPath?.isTSTypeAliasDeclaration() === true ||
+    path.parentPath?.isTSInterfaceDeclaration() === true)
 
 /**
  * Whether a declarator inside a function initializes its bindings with a call.

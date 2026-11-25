@@ -325,9 +325,9 @@ const TYPE_REFERENCE_PARENTS = new Set([
 
 /**
  * Babel counts the name of a same-named TypeScript type alias, interface or
- * overload signature, and a name used in a type (`typeof x`, a computed key),
- * as a reference to a value binding. These disappear with the types and never
- * read the value.
+ * overload signature, a name used in a type (`typeof x`, a computed key) and
+ * a type-only export as a reference to a value binding. These disappear with
+ * the types and never read the value.
  */
 function isTypeOnlyReference(path: NodePath): boolean {
   if (
@@ -338,6 +338,9 @@ function isTypeOnlyReference(path: NodePath): boolean {
   ) {
     return true
   }
+  if (path.parentPath?.isExportSpecifier()) {
+    return isTypeOnlyExport(path.parentPath)
+  }
   // Climb the dotted name the reference starts: `x.y` in a type is a
   // qualified name, and in a computed key a member expression.
   let parent = path.parentPath
@@ -345,6 +348,16 @@ function isTypeOnlyReference(path: NodePath): boolean {
     parent = parent.parentPath
   }
   return parent !== null && TYPE_REFERENCE_PARENTS.has(parent.type)
+}
+
+/** Whether an export specifier exports only a type: `export type { s }`, `export { type s }`. */
+export function isTypeOnlyExport(
+  specifier: NodePath<Babel.ExportSpecifier>,
+): boolean {
+  return (
+    specifier.node.exportKind === "type" ||
+    (specifier.parent as Babel.ExportNamedDeclaration).exportKind === "type"
+  )
 }
 
 /** Whether code other than TypeScript declarations references the binding. */

@@ -583,6 +583,29 @@ describe("values used only in types", () => {
   })
 
   test.each([
+    ["export type", "export type { schema }", ""],
+    ["export { type }", "export { type schema, keep }", "export { keep };"],
+    [
+      "export type next to a same-named type",
+      "type schema = number\nexport type { schema }",
+      "type schema = number;\nexport type { schema };",
+    ],
+  ])("removes a value only %s exports", (_, usage, rest) => {
+    let source = ts`
+      import { z } from "zod"
+      const schema = z.object({})
+      const keep = 1
+      ${usage}
+    `
+    let output = transform(source, { candidates: "none", typescript: true })
+    expect(output).toBe(
+      [rest.includes("keep") ? "const keep = 1;" : "", rest]
+        .filter(Boolean)
+        .join("\n"),
+    )
+  })
+
+  test.each([
     ["typeof in an expression", "export const kind = typeof schema"],
     ["a computed key in a class", "export class C { [schema.key] = 1 }"],
   ])("keeps a value read by %s", (_, usage) => {

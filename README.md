@@ -170,10 +170,12 @@ scopes before your visitor runs.
 - **`eval` is not supported.** Code that a direct `eval` reads is invisible to
   the analysis, so `const x = 1; eval("x")` removes `x`.
 - **Types are not cleaned up.** References inside TypeScript types (`typeof x`,
-  `x as typeof schema`, `implements X`, `{ [key]: T }`) do not keep a value
-  alive, because types are erased before the code runs. The types themselves stay, so the output can
-  contain a type that names a removed value, such as `type T = typeof schema`.
-  Strip types before type-checking the output, or do not type-check it.
+  `x as typeof schema`, `implements X`, `{ [key]: T }`, `export type { x }`) do
+  not keep a value alive, because types are erased before the code runs. The
+  types themselves stay, so the output can contain a type that names a removed
+  value, such as `type T = typeof schema`. Only a type-only export of a removed
+  value goes with it. Strip types before type-checking the output, or do not
+  type-check it.
 - **A dead cycle that your transform cuts stays.** `findReferencedIdentifiers`
   leaves out names that only read each other in a closed cycle, such as `x` and
   `foo` in `const x = createServerFn().handler(() => foo()); const foo = () => x`.
