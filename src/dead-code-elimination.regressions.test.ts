@@ -330,6 +330,19 @@ describe("missed eliminations", () => {
     expect(output).not.toContain("serialize")
   })
 
+  test("removes a declaration whose name a removed local repeats", () => {
+    let source = ts`
+      export function Component() {
+        const config = 0
+        return 1
+      }
+      const config = loadConfig()
+    `
+    expect(transform(source, { candidates: "none" })).not.toContain(
+      "loadConfig",
+    )
+  })
+
   test("resolves a function declaration's name outside its own scope", () => {
     let source = ts`
       import { db } from "./db.server"

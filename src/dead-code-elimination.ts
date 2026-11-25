@@ -77,8 +77,12 @@ export default function (
     // Only remove a declaration whose own binding is known. Removing a sole
     // declarator also removes its declaration, and Babel deletes the name
     // from scope for both, so the second deletion can drop a same-named
-    // binding of an enclosing scope until the next crawl.
-    if (binding?.identifier !== ident.node) return false
+    // binding of an enclosing scope until the bindings are refreshed. Such a
+    // declaration is decided in another pass.
+    if (binding?.identifier !== ident.node) {
+      needsAnotherPass = true
+      return false
+    }
 
     // If nothing that elimination keeps reaches the binding, allow removal
     if (removableBindings.has(binding)) return true
