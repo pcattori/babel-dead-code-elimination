@@ -93,12 +93,19 @@ export default function (
     return true
   }
 
-  // Call before removing anything but imports. Such a removal can make other
-  // declarations unused, so another pass follows, and it can make Babel drop
-  // unrelated bindings by name, so bindings are recorded before the first one.
+  // Call before removing anything but imports. Such a removal can make Babel
+  // drop unrelated bindings by name, so bindings are recorded before the first
+  // one. Whether it made another declaration unused is decided after the pass,
+  // from the references it dropped (see refreshBindings).
+  let removedAny = false
   const willRemove = (): void => {
-    needsAnotherPass = true
+    removedAny = true
     snapshot ??= snapshotBindings(programPath)
+  }
+  // Call when a removal changes a pattern without dropping a reference: an
+  // emptied enclosing pattern, or keys no longer filtered out of a rest.
+  const reshapedPattern = (): void => {
+    needsAnotherPass = true
   }
 
   const visit = (path: NodePath): void => {
@@ -167,6 +174,7 @@ export default function (
 
           if (parent.isRestElement()) {
             willRemove()
+            reshapedPattern()
             parent.remove()
             continue
           }
@@ -189,6 +197,7 @@ export default function (
       ) {
         willRemove()
         markEmptied(path)
+        if (!t.isVariableDeclarator(path.parent)) reshapedPattern()
         Pattern.remove(path)
       }
       return
@@ -206,6 +215,7 @@ export default function (
       ) {
         willRemove()
         markEmptied(path)
+        if (!t.isVariableDeclarator(path.parent)) reshapedPattern()
         Pattern.remove(path)
       }
       return
@@ -262,9 +272,12 @@ export default function (
         visit(path)
       }
     }
-    if (!needsAnotherPass) break
+    if (!removedAny) break
+    removedAny = false
+    // Refresh even when no pass follows, so the bindings match the output.
+    const newlyUnused = refreshBindings(snapshot!)
+    if (!needsAnotherPass && !newlyUnused) break
     needsAnotherPass = false
-    refreshBindings(snapshot!)
     removableBindings = findRemovableBindings(programPath, isKept)
   }
 }

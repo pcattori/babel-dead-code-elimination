@@ -6,7 +6,7 @@ import {
   type Binding,
 } from "./babel-esm"
 import { DECLARATION_TYPES, forEachDeclaredIdentifier } from "./declarations"
-import { getDeclaredBinding } from "./find-removable-bindings"
+import { getDeclaredBinding, isReferenced } from "./find-removable-bindings"
 import { forEachMatchingPath } from "./walk"
 
 /**
@@ -83,9 +83,12 @@ export function snapshotBindings(
  * produce, after elimination removed nodes: references and constant
  * violations in removed code are dropped, removed declarations leave their
  * scope, and bindings that Babel deleted by name while removing a same-named
- * declaration elsewhere are registered again.
+ * declaration elsewhere are registered again. Returns whether a declaration
+ * that is still there became unused or constant: only then can another pass
+ * remove more.
  */
-export function refreshBindings(snapshot: BindingSnapshot): void {
+export function refreshBindings(snapshot: BindingSnapshot): boolean {
+  let lost = false
   for (const { identifier, binding } of snapshot.declared) {
     const bindings = binding.scope.bindings
     const name = identifier.node.name
@@ -94,21 +97,29 @@ export function refreshBindings(snapshot: BindingSnapshot): void {
       continue
     }
     bindings[name] = binding
-    dropRemovedPaths(binding)
+    if (dropRemovedPaths(binding)) lost = true
   }
   const bindings = snapshot.programPath.scope.bindings
   for (const [name, binding] of snapshot.retained) {
     bindings[name] = binding
     dropRemovedPaths(binding)
   }
+  return lost
 }
 
-function dropRemovedPaths(binding: Binding): void {
+/** Drops removed paths, and returns whether the binding became unused or constant. */
+function dropRemovedPaths(binding: Binding): boolean {
+  const wasReferenced = isReferenced(binding)
+  const wasConstant = binding.constantViolations.length === 0
   binding.referencePaths = binding.referencePaths.filter(isAttached)
   binding.references = binding.referencePaths.length
   binding.referenced = binding.references > 0
   binding.constantViolations = binding.constantViolations.filter(isAttached)
   binding.constant = binding.constantViolations.length === 0
+  return (
+    (wasReferenced && !isReferenced(binding)) ||
+    (!wasConstant && binding.constant)
+  )
 }
 
 // Babel removal clears the removed path, not its descendants. Pattern cleanup
