@@ -137,13 +137,15 @@ export default function (
           willRemove()
           path.remove()
         }
-      } else if (id.isObjectPattern() || id.isArrayPattern()) {
-        for (let variable of Pattern.findVariables(id)) {
+      } else {
+        // A parsed declarator binds an identifier or a pattern.
+        const pattern = id as NodePath<Babel.ObjectPattern | Babel.ArrayPattern>
+        for (let variable of Pattern.findVariables(pattern)) {
           // Keep unused variables that are filtered out of an object rest: in
           // `let { a, ...rest } = ...`, removing `a` would add it to `rest`.
           // This includes defaults and nested patterns, and takes precedence
           // over removable cycles.
-          if (Pattern.isRestFiltered(id.node, variable.node)) continue
+          if (Pattern.isRestFiltered(pattern.node, variable.node)) continue
           if (!shouldBeRemoved(variable)) continue
           if (callsInFunction(path)) break
           markEmptied(variable)
@@ -183,7 +185,7 @@ export default function (
         for (let sibling of path.getAllPrevSiblings()) {
           if (
             sibling.isTSDeclareFunction() &&
-            sibling.node.id?.name === id.node.name
+            sibling.node.id!.name === id.node.name
           ) {
             sibling.remove()
           }
@@ -192,17 +194,17 @@ export default function (
       }
       return
     }
-    if (path.isClassDeclaration()) {
-      let id = path.get("id")
-      if (
-        id.isIdentifier() &&
-        shouldBeRemoved(id) &&
-        !hasDefinitionSideEffects(path)
-      ) {
-        willRemove()
-        path.remove()
-      }
-      return
+    // Only the declaration types in ELIMINATION_TYPES reach visit, so this
+    // is a class declaration.
+    const classPath = path as NodePath<Babel.ClassDeclaration>
+    let id = classPath.get("id")
+    if (
+      id.isIdentifier() &&
+      shouldBeRemoved(id) &&
+      !hasDefinitionSideEffects(classPath)
+    ) {
+      willRemove()
+      classPath.remove()
     }
   }
 
@@ -276,8 +278,8 @@ function findTypeOnlyExports(programPath: NodePath<Babel.Program>) {
 /** Whether a reference is the name of a same-named type alias or interface. */
 const isSameNamedType = (path: NodePath): boolean =>
   path.key === "id" &&
-  (path.parentPath?.isTSTypeAliasDeclaration() === true ||
-    path.parentPath?.isTSInterfaceDeclaration() === true)
+  (path.parent.type === "TSTypeAliasDeclaration" ||
+    path.parent.type === "TSInterfaceDeclaration")
 
 /**
  * Whether a declarator inside a function evaluates a call when its initializer

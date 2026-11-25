@@ -95,7 +95,9 @@ export function refreshBindings(snapshot: BindingSnapshot): boolean {
     const bindings = binding.scope.bindings
     const name = identifier.node.name
     if (!isAttached(identifier)) {
-      if (bindings[name] === binding) delete bindings[name]
+      // Each scope binds a name once, so this is the removed binding or
+      // nothing Babel left.
+      delete bindings[name]
       continue
     }
     bindings[name] = binding
