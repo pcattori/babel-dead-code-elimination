@@ -943,3 +943,28 @@ describe("decorators on declarations without a body", () => {
     },
   )
 })
+
+describe("a class judged after a same-named binding was removed", () => {
+  test.each([
+    [
+      "a module constant",
+      "{ const cfg = 0 }\n{ class C { [cfg]() {} } }\nconst cfg = 1\nexport { cfg }",
+      "{}\n{}\nconst cfg = 1;\nexport { cfg };",
+    ],
+    [
+      "a module constant, in a function",
+      'export function g() {\n  { const cfg = 0 }\n  class C { [cfg]() {} }\n}\nconst cfg = "k"',
+      "export function g() {\n  {}\n}",
+    ],
+    [
+      "a parameter",
+      "export function g(cfg) {\n  { const cfg = 0 }\n  class C { [cfg]() {} }\n}",
+      "export function g(cfg) {\n  {}\n}",
+    ],
+  ])(
+    "removes an unused class whose computed key reads %s that a nested block redeclares",
+    (_, source, expected) => {
+      expect(transform(source, { candidates: "none" })).toBe(expected)
+    },
+  )
+})

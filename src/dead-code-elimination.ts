@@ -241,12 +241,13 @@ export default function (
     }
   }
 
-  // Whether defining a class runs code is decided once, before anything is
-  // removed: once a name the class reads is removed, Babel would judge the
-  // read as one of a global, which may throw. findRemovableBindings decides
-  // it for every class of a scope before anything in that scope goes, and a
-  // class reads a name of an enclosing scope only from inside a declaration
-  // that is kept, or removed with the class, while the name stays.
+  // Whether defining a class runs code is decided for every class before
+  // anything is removed: once a name the class reads loses its binding,
+  // Babel judges the read as one of a global, which may throw. A removal can
+  // drop a binding the class reads even when the name stays: Babel deletes a
+  // removed declaration's name by name, which can reach a same-named binding
+  // of an enclosing scope, such as a parameter or a module constant that a
+  // nested block redeclares.
   const classRunsCode = new Map<Babel.Node, boolean>()
   const runsCode = (path: NodePath<Babel.ClassDeclaration>): boolean => {
     let result = classRunsCode.get(path.node)
@@ -267,7 +268,10 @@ export default function (
   forEachMatchingPath(
     programPath,
     (node) => ELIMINATION_TYPES.has(node.type),
-    (path) => paths.push(path),
+    (path) => {
+      paths.push(path)
+      if (path.isClassDeclaration()) runsCode(path)
+    },
   )
 
   // Elimination only removes nodes. Revisit the declaration paths in source
