@@ -237,7 +237,12 @@ export default function (
     // is a class declaration.
     const classPath = path as NodePath<Babel.ClassDeclaration>
     let id = classPath.get("id")
-    if (id.isIdentifier() && shouldBeRemoved(id) && !runsCode(classPath)) {
+    if (
+      id.isIdentifier() &&
+      shouldBeRemoved(id) &&
+      !runsCode(classPath) &&
+      !callsInFunction(classPath)
+    ) {
       willRemove()
       classPath.remove()
     }

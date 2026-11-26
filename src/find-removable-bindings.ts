@@ -214,7 +214,7 @@ function buildReferenceGraph(
 
   // Mark bindings as excluded (not removable) if they have external refs or
   // reassignments, or are kept: by candidates, as loop heads, or as locals
-  // whose declarator calls something when it runs (see callsInFunction).
+  // whose declaration calls something when it runs (see callsInFunction).
   const excluded = new Uint8Array(n)
   // excluded bindings whose refs need to be excluded too
   const exclusionQueue: number[] = []
@@ -282,7 +282,9 @@ function buildReferenceGraph(
       !isRemovableDeclaration(binding, classRunsCode) ||
       isKept?.(binding) ||
       isLoopIteratorBinding(binding) ||
-      (binding.path.isVariableDeclarator() && callsInFunction(binding.path))
+      ((binding.path.isVariableDeclarator() ||
+        binding.path.isClassDeclaration()) &&
+        callsInFunction(binding.path))
     ) {
       excluded[i] = 1
       candidateCount--
@@ -499,8 +501,10 @@ export type ClassRunsCode = (path: NodePath<Babel.ClassDeclaration>) => boolean
 /**
  * Whether defining the class runs code whose effects removal would drop:
  * decorators (which commonly register the class), static blocks, impure
- * static initializers or computed keys, or an `extends` clause other than a
- * (dotted) name. Only standard decorators count: on the class, a method with
+ * computed keys, or an `extends` clause other than a (dotted) name. A static
+ * field's initializer is like a constant's: it keeps nothing at the module
+ * level, and in a function it keeps the class like a local whose
+ * initializer calls (see callsInFunction). Only standard decorators count: on the class, a method with
  * a body, an accessor or a field that is neither `declare` nor abstract.
  * Legacy (`experimentalDecorators`) decorators are not supported, so a
  * decorator on a parameter, an overload signature, an abstract member or a
@@ -516,16 +520,6 @@ export function hasDefinitionSideEffects(
     if (t.isStaticBlock(member)) return true
     if (hasStandardDecorators(member)) return true
     if ("computed" in member && member.computed && !scope.isPure(member.key)) {
-      return true
-    }
-    if (
-      (t.isClassProperty(member) ||
-        t.isClassPrivateProperty(member) ||
-        t.isClassAccessorProperty(member)) &&
-      member.static &&
-      member.value &&
-      !scope.isPure(member.value)
-    ) {
       return true
     }
   }
@@ -609,7 +603,8 @@ function hasStandardDecorators(member: Babel.Node): boolean {
 }
 
 /**
- * Whether a declarator inside a function evaluates a call when it runs, in its
+ * Whether a declarator or class declaration inside a function evaluates a
+ * call when it runs, in its
  * initializer or in its pattern's defaults and computed keys, directly or
  * nested (`useId()`, `useCtx().value`, `c ? useA() : 0`, `[useA()]`,
  * `{ id = useId() }`, `{ [useKey()]: a }`), including what a class or object
@@ -623,12 +618,14 @@ function hasStandardDecorators(member: Babel.Node): boolean {
  * bindings are unused.
  */
 export function callsInFunction(
-  path: NodePath<Babel.VariableDeclarator>,
+  path: NodePath<Babel.VariableDeclarator | Babel.ClassDeclaration>,
 ): boolean {
-  return (
-    path.getFunctionParent() !== null &&
-    (evaluatesCall(path.node.init) || evaluatesCall(path.node.id))
-  )
+  if (path.getFunctionParent() === null) return false
+  const node = path.node
+  // A class declaration's static fields are like a constant's initializer.
+  return t.isClassDeclaration(node)
+    ? classEvaluatesCall(node)
+    : evaluatesCall(node.init) || evaluatesCall(node.id)
 }
 
 function evaluatesCall(node: Babel.Node | null | undefined): boolean {

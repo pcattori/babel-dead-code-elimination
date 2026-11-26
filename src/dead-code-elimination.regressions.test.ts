@@ -686,11 +686,6 @@ describe("definition side effects", () => {
     ],
     ["member decorator", "class User { @Column() name = '' }", false],
     ["static block", "class Setup { static { init() } }", false],
-    [
-      "static initializer",
-      "class Config { static instance = createConfig() }",
-      false,
-    ],
     ["computed key", "class Keyed { [computeKey()]() {} }", false],
     ["extends call", "class Logged extends withLogging(Base) {}", false],
   ])(
@@ -1064,4 +1059,29 @@ describe("calls a class or object initializer evaluates", () => {
     let output = transform(source, { candidates: "none", typescript: true })
     expect(output.includes("const K")).toBe(kept)
   })
+})
+
+describe("static field initializers", () => {
+  test("count for nothing in an unused module-level class", () => {
+    let source = ts`
+      import { connect } from "~/db.server"
+      class Repo { static db = connect() }
+      export const z = 1
+    `
+    expect(transform(source, { candidates: "none" })).toBe(
+      "export const z = 1;",
+    )
+  })
+
+  test.each([
+    ["calls", "class K { static s = hook() }", true],
+    ["calls nothing", "class K { static s = 0 }", false],
+  ])(
+    "keep a class declared in a function like a constant when it %s",
+    (_, cls, kept) => {
+      let source = `export function F() {\n  ${cls}\n  return 0\n}`
+      let output = transform(source, { candidates: "none" })
+      expect(output.includes("class K")).toBe(kept)
+    },
+  )
 })
