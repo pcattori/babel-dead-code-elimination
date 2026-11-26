@@ -514,14 +514,7 @@ export function hasDefinitionSideEffects(
   if (node.superClass && !isName(node.superClass)) return true
   for (const member of node.body.body) {
     if (t.isStaticBlock(member)) return true
-    const standard = !(
-      t.isTSDeclareMethod(member) ||
-      ("declare" in member && member.declare === true) ||
-      ("abstract" in member && member.abstract === true)
-    )
-    if (standard && "decorators" in member && member.decorators?.length) {
-      return true
-    }
+    if (hasStandardDecorators(member)) return true
     if ("computed" in member && member.computed && !scope.isPure(member.key)) {
       return true
     }
@@ -581,11 +574,49 @@ export function isLoopIteratorBinding(binding: Binding): boolean {
 }
 
 /**
+ * What defining a class evaluates: its decorators' application, `extends`,
+ * computed keys, member decorators, static fields and static blocks; method
+ * bodies and instance fields run later.
+ */
+function classEvaluatesCall(node: Babel.Class): boolean {
+  if (node.decorators?.length || evaluatesCall(node.superClass)) return true
+  return node.body.body.some(
+    (member) =>
+      (t.isStaticBlock(member) && member.body.some(evaluatesCall)) ||
+      hasStandardDecorators(member) ||
+      ("computed" in member && member.computed && evaluatesCall(member.key)) ||
+      ((t.isClassProperty(member) ||
+        t.isClassPrivateProperty(member) ||
+        t.isClassAccessorProperty(member)) &&
+        member.static &&
+        evaluatesCall(member.value)),
+  )
+}
+
+/**
+ * Whether a class member carries standard decorators: on a method with a
+ * body, an accessor or a field that is neither `declare` nor abstract.
+ * Legacy (`experimentalDecorators`) decorators are not supported.
+ */
+function hasStandardDecorators(member: Babel.Node): boolean {
+  return (
+    "decorators" in member &&
+    !!member.decorators?.length &&
+    !t.isTSDeclareMethod(member) &&
+    !("declare" in member && member.declare === true) &&
+    !("abstract" in member && member.abstract === true)
+  )
+}
+
+/**
  * Whether a declarator inside a function evaluates a call when it runs, in its
  * initializer or in its pattern's defaults and computed keys, directly or
  * nested (`useId()`, `useCtx().value`, `c ? useA() : 0`, `[useA()]`,
- * `{ id = useId() }`, `{ [useKey()]: a }`), but not in a nested function
- * (`() => useA()` runs nothing). Such calls run on every invocation, and some
+ * `{ id = useId() }`, `{ [useKey()]: a }`), including what a class or object
+ * initializer evaluates when it is created (computed keys, `extends`, static
+ * fields and blocks, standard decorators, whose application is a call), but
+ * not in a nested function, method body or instance field (`() => useA()`
+ * runs nothing). Such calls run on every invocation, and some
  * must run in the same order in every build: removing an unused
  * `const id = useId()` from a component only in the server build shifts
  * React's hook-based ids. Declarations like these are kept even when their
@@ -601,7 +632,7 @@ export function callsInFunction(
 }
 
 function evaluatesCall(node: Babel.Node | null | undefined): boolean {
-  if (!node || t.isFunction(node)) return false
+  if (!node) return false
   if (
     t.isCallExpression(node) ||
     t.isOptionalCallExpression(node) ||
@@ -610,6 +641,10 @@ function evaluatesCall(node: Babel.Node | null | undefined): boolean {
   ) {
     return true
   }
+  // Creating an object runs a method's computed key, not its body.
+  if (t.isObjectMethod(node)) return node.computed && evaluatesCall(node.key)
+  if (t.isFunction(node)) return false
+  if (t.isClass(node)) return classEvaluatesCall(node)
   for (const key of t.VISITOR_KEYS[node.type]!) {
     const child = (node as unknown as Record<string, unknown>)[key]
     if (

@@ -1041,3 +1041,27 @@ describe("import type declarations", () => {
     )
   })
 })
+
+describe("calls a class or object initializer evaluates", () => {
+  test.each([
+    ["an object's computed method key", "{ [hook()]() {} }", true],
+    [
+      "an object's computed getter key",
+      "{ get [hook()]() { return 1 } }",
+      true,
+    ],
+    ["an object method's body", "{ m() { hook() } }", false],
+    ["a class's computed method key", "class { [hook()]() {} }", true],
+    ["a class's extends", "class extends hook() {}", true],
+    ["a class's instance field", "class { x = hook() }", false],
+    ["a class's static field", "class { static x = hook() }", true],
+    ["a class's static block", "class { static { hook() } }", true],
+    ["a class member's decorator", "class { @register m() {} }", true],
+    ["a class's decorator", "@register class {}", true],
+    ["a parameter decorator", "class { m(@register p) {} }", false],
+  ])("in a function, %s", (_, init, kept) => {
+    let source = `export function F() {\n  const K = ${init}\n  return 0\n}`
+    let output = transform(source, { candidates: "none", typescript: true })
+    expect(output.includes("const K")).toBe(kept)
+  })
+})
