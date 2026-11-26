@@ -685,11 +685,6 @@ describe("definition side effects", () => {
       false,
     ],
     ["member decorator", "class User { @Column() name = '' }", false],
-    [
-      "parameter decorator",
-      "class Service { constructor(@Inject(Token) dep: Dep) {} }",
-      true,
-    ],
     ["static block", "class Setup { static { init() } }", false],
     [
       "static initializer",
@@ -913,7 +908,7 @@ describe("unused cycles inside functions", () => {
   })
 })
 
-describe("decorators on declarations without a body", () => {
+describe("decorators that are not standard decorators", () => {
   test.each([
     ["an overload", "class C { @log m(p: number): void; m(p?: any) {} }"],
     [
@@ -927,13 +922,22 @@ describe("decorators on declarations without a body", () => {
       "abstract class C { abstract m(@log p): void }",
     ],
     ["an abstract field", "abstract class C { @log abstract s: number }"],
+    // Legacy parameter decorators are not supported (R3-D6).
+    [
+      "an implementation's parameter",
+      "class C { m(@log p: number): void; m(@log p?: any) {} }",
+    ],
+    [
+      "a constructor parameter",
+      "class Service { constructor(@Inject(Token) dep: Dep) {} }",
+    ],
   ])("removes an unused class whose only decorator is on %s", (_, source) => {
     expect(transform(source, { candidates: "none", typescript: true })).toBe("")
   })
 
   test.each([
     ["method", "class C { @log m(p: number): void; @log m(p?: any) {} }"],
-    ["parameter", "class C { m(@log p: number): void; m(@log p?: any) {} }"],
+    ["getter", "class C { @log get g() { return 1 } }"],
     ["field", "class C { @log s: number }"],
   ])(
     "keeps an unused class with a decorated implementation %s",

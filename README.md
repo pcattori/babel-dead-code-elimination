@@ -183,6 +183,12 @@ scopes before your visitor runs.
   compilation the module reads `React` nowhere, so `import React from "react"`
   is removed when only JSX would use it. Run elimination after the JSX
   transform, use the automatic runtime, or read the import in code.
+- **Legacy decorators are not supported.** Only standard decorators keep an
+  unused class: on the class, on a method with a body, on an accessor, and on
+  a field that is neither `declare` nor abstract. A decorator that only
+  TypeScript's `experimentalDecorators` allows, such as one on a parameter
+  (`constructor(@Inject(Token) dep: Dep)`), counts for nothing, so a class
+  that nothing reads is removed with it.
 - **A dead cycle that your transform cuts stays.** `findReferencedIdentifiers`
   leaves out names that only read each other in a closed cycle, such as `x` and
   `foo` in `const x = createServerFn().handler(() => foo()); const foo = () => x`.
