@@ -245,6 +245,14 @@ scopes before your visitor runs.
   TypeScript's `experimentalDecorators` allows, such as one on a parameter
   (`constructor(@Inject(Token) dep: Dep)`), counts for nothing, so a class
   that nothing reads is removed with it.
+- **A name read only in types is never a candidate.** `findReferencedIdentifiers`
+  leaves out a name that only types read, so it stays when your transform
+  removes the code holding those type reads, as everything does that was
+  already unused: in
+  `import { UserRecord } from "./models.server"` with
+  `createServerFn().handler(async () => load<UserRecord>())`, stripping the
+  handler keeps the import. Remove such imports yourself, or strip types
+  first.
 - **A dead cycle that your transform cuts stays.** `findReferencedIdentifiers`
   leaves out names that only read each other in a closed cycle, such as `x` and
   `foo` in `const x = createServerFn().handler(() => foo()); const foo = () => x`.

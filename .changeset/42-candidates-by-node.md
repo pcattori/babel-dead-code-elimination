@@ -4,4 +4,4 @@
 
 Match candidates by node, so a rebuilt declaration stays a candidate
 
-`deadCodeElimination(ast, referenced)` matched a candidate by its path when deciding whether to remove it, but by its node when deciding what the kept code reads. A transform that rebuilds a declarator around its own id node, as in `path.replaceWith(t.variableDeclarator(path.node.id, g(b)))`, gives the id a new path: the declarator then stayed, as if it were not a candidate, while `b`, which only it reads, was removed, and the output threw a `ReferenceError`. Candidates are now matched by node everywhere, so such a declaration is removed or kept like any other candidate.
+A transform that rebuilds a declarator around its own id node, as in `path.replaceWith(t.variableDeclarator(path.node.id, init))`, gives the id a new path. `deadCodeElimination(ast, referenced)` matched candidates by path, so such a declaration was no longer a candidate and stayed even when the transform left it unused. Candidates are now matched by node, so it is removed like any other candidate, together with what only it reads.
