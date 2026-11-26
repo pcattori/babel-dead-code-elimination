@@ -174,9 +174,10 @@ scopes before your visitor runs.
   not keep a value alive, because types are erased before the code runs. The
   types themselves stay, so the output can contain a type that names a removed
   value, such as `type T = typeof schema`. Only a type-only export of a removed
-  value goes with it, and an import that elimination leaves with only type
-  specifiers (`import { type User } from "./db.server"`). Strip types before type-checking the output, or do not
-  type-check it.
+  value goes with it, and a value import that elimination leaves with only
+  type specifiers (`import { type User } from "./db.server"`); an
+  `import type` declaration loses only the specifiers elimination removes.
+  Strip types before type-checking the output, or do not type-check it.
 - **The classic JSX runtime's import is not kept by JSX.** With the classic
   runtime, `<div />` compiles to `React.createElement("div")`, but before that
   compilation the module reads `React` nowhere, so `import React from "react"`

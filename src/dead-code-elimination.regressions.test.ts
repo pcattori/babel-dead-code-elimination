@@ -1002,3 +1002,38 @@ describe("scopes after elimination", () => {
     },
   )
 })
+
+describe("import type declarations", () => {
+  let named =
+    (...names: string[]) =>
+    (ast: Babel.File) => {
+      let set = new Set<NodePath<Babel.Identifier>>()
+      traverse(ast, {
+        Identifier(path) {
+          if (names.includes(path.node.name) && path.isBindingIdentifier())
+            set.add(path)
+        },
+      })
+      return set
+    }
+
+  test("keep the specifiers outside the candidates", () => {
+    let source = ts`
+      import type { A, B } from "./db.server"
+      type T = B
+    `
+    expect(
+      transform(source, { candidates: named("A"), typescript: true }),
+    ).toBe('import type { B } from "./db.server";\ntype T = B;')
+  })
+
+  test("keep a specifier that kept code reads", () => {
+    let source = ts`
+      import type { A, B } from "./db.server"
+      export { A }
+    `
+    expect(transform(source, { candidates: "none", typescript: true })).toBe(
+      'import type { A } from "./db.server";\nexport { A };',
+    )
+  })
+})

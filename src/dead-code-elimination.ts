@@ -147,18 +147,20 @@ export default function (
           removedValue = true
         }
       }
-      // An import left with only type specifiers would still load its module
-      // where types are kept as imports (`verbatimModuleSyntax` emits
-      // `import {} from "./db.server"`), so it goes with its last value.
+      // A value import left with only type specifiers would still load its
+      // module where types are kept as imports (`verbatimModuleSyntax` emits
+      // `import {} from "./db.server"`), so it goes with its last value. An
+      // `import type` declaration loads nothing and loses only its removed
+      // specifiers.
       const node = path.node
       if (
         node.specifiers.length === 0 ||
         (removedValue &&
+          node.importKind !== "type" &&
           node.specifiers.every(
             (specifier) =>
-              node.importKind === "type" ||
-              (specifier.type === "ImportSpecifier" &&
-                specifier.importKind === "type"),
+              specifier.type === "ImportSpecifier" &&
+              specifier.importKind === "type",
           ))
       ) {
         path.remove()
