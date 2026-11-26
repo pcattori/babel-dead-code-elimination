@@ -912,3 +912,34 @@ describe("unused cycles inside functions", () => {
     expect(transform(source, { candidates: "none" })).toBe(unchanged(source))
   })
 })
+
+describe("decorators on declarations without a body", () => {
+  test.each([
+    ["an overload", "class C { @log m(p: number): void; m(p?: any) {} }"],
+    [
+      "an overload's parameter",
+      "class C { m(@log p: number): void; m(p?: any) {} }",
+    ],
+    ["a declare field", "class C { @log declare s: number }"],
+    ["an abstract method", "abstract class C { @log abstract m(): void }"],
+    [
+      "an abstract method's parameter",
+      "abstract class C { abstract m(@log p): void }",
+    ],
+    ["an abstract field", "abstract class C { @log abstract s: number }"],
+  ])("removes an unused class whose only decorator is on %s", (_, source) => {
+    expect(transform(source, { candidates: "none", typescript: true })).toBe("")
+  })
+
+  test.each([
+    ["method", "class C { @log m(p: number): void; @log m(p?: any) {} }"],
+    ["parameter", "class C { m(@log p: number): void; m(@log p?: any) {} }"],
+    ["field", "class C { @log s: number }"],
+  ])(
+    "keeps an unused class with a decorated implementation %s",
+    (_, source) => {
+      let output = transform(source, { candidates: "none", typescript: true })
+      expect(output).toContain("class C")
+    },
+  )
+})

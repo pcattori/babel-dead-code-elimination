@@ -500,7 +500,9 @@ export type ClassRunsCode = (path: NodePath<Babel.ClassDeclaration>) => boolean
  * Whether defining the class runs code whose effects removal would drop:
  * decorators (which commonly register the class), static blocks, impure
  * static initializers or computed keys, or an `extends` clause other than a
- * (dotted) name.
+ * (dotted) name. Decorators on a member without a body (an overload
+ * signature, an abstract member, a `declare` field) and on its parameters
+ * are erased with it and never run.
  */
 export function hasDefinitionSideEffects(
   path: NodePath<Babel.ClassDeclaration>,
@@ -510,7 +512,13 @@ export function hasDefinitionSideEffects(
   if (node.superClass && !isName(node.superClass)) return true
   for (const member of node.body.body) {
     if (t.isStaticBlock(member)) return true
-    if ("decorators" in member && member.decorators?.length) return true
+    const erased =
+      t.isTSDeclareMethod(member) ||
+      ("declare" in member && member.declare === true) ||
+      ("abstract" in member && member.abstract === true)
+    if (!erased && "decorators" in member && member.decorators?.length) {
+      return true
+    }
     if ("computed" in member && member.computed && !scope.isPure(member.key)) {
       return true
     }
@@ -525,7 +533,7 @@ export function hasDefinitionSideEffects(
       return true
     }
     if (
-      (t.isClassMethod(member) || t.isTSDeclareMethod(member)) &&
+      t.isClassMethod(member) &&
       member.params.some((param) => param.decorators?.length)
     ) {
       return true
