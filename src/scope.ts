@@ -4,6 +4,7 @@ import {
   type NodePath,
   type Babel,
   type Binding,
+  type Scope,
 } from "./babel-esm"
 import { DECLARATION_TYPES, forEachDeclaredIdentifier } from "./declarations"
 import { getDeclaredBinding } from "./find-removable-bindings"
@@ -48,9 +49,26 @@ export type BindingSnapshot = {
   programPath: NodePath<Babel.Program>
   /** Bindings of the declarations elimination considers, in all scopes. */
   declared: Array<{ identifier: NodePath<Babel.Identifier>; binding: Binding }>
-  /** Other program bindings (e.g. TypeScript enums), which are never removed. */
-  retained: Array<[string, Binding]>
+  /**
+   * Bindings no declaration elimination considers makes, with their scope:
+   * parameters, catch parameters, the own name of a function or class
+   * expression, and program bindings such as Babel 8's TypeScript enums.
+   * Elimination never removes them, but Babel may delete them by name.
+   */
+  retained: Array<[Scope, string, Binding]>
 }
+
+/** Nodes whose scope holds bindings that no declaration makes. */
+const SCOPE_OWNER_TYPES = new Set([
+  "FunctionDeclaration",
+  "FunctionExpression",
+  "ArrowFunctionExpression",
+  "ObjectMethod",
+  "ClassMethod",
+  "ClassPrivateMethod",
+  "CatchClause",
+  "ClassExpression",
+])
 
 /** Records the bindings of a program. Call after a crawl, before removals. */
 export function snapshotBindings(
@@ -58,22 +76,29 @@ export function snapshotBindings(
 ): BindingSnapshot {
   const declared: BindingSnapshot["declared"] = []
   const declaredBindings = new Set<Binding>()
+  const owners: Scope[] = [programPath.scope]
   forEachMatchingPath(
     programPath,
-    (node) => DECLARATION_TYPES.has(node.type),
-    (path) =>
+    (node) =>
+      DECLARATION_TYPES.has(node.type) || SCOPE_OWNER_TYPES.has(node.type),
+    (path) => {
+      if (SCOPE_OWNER_TYPES.has(path.node.type)) owners.push(path.scope)
+      if (!DECLARATION_TYPES.has(path.node.type)) return
       forEachDeclaredIdentifier(path, (identifier) => {
         const binding = getDeclaredBinding(identifier)
         if (binding?.identifier === identifier.node) {
           declared.push({ identifier, binding })
           declaredBindings.add(binding)
         }
-      }),
+      })
+    },
   )
   const retained: BindingSnapshot["retained"] = []
-  for (const name of Object.keys(programPath.scope.bindings)) {
-    const binding = programPath.scope.bindings[name]!
-    if (!declaredBindings.has(binding)) retained.push([name, binding])
+  for (const scope of owners) {
+    for (const name of Object.keys(scope.bindings)) {
+      const binding = scope.bindings[name]!
+      if (!declaredBindings.has(binding)) retained.push([scope, name, binding])
+    }
   }
   return { programPath, declared, retained }
 }
@@ -103,11 +128,12 @@ export function refreshBindings(snapshot: BindingSnapshot): boolean {
     bindings[name] = binding
     if (dropRemovedPaths(binding)) lost = true
   }
-  // A retained binding is never removed, so a reference it lost cannot let
-  // another pass remove more.
-  const bindings = snapshot.programPath.scope.bindings
-  for (const [name, binding] of snapshot.retained) {
-    bindings[name] = binding
+  // A retained binding is never removed on its own, so a reference it lost
+  // cannot let another pass remove more. It goes only with the function or
+  // class that holds it.
+  for (const [scope, name, binding] of snapshot.retained) {
+    if (!isAttached(binding.path)) continue
+    scope.bindings[name] = binding
     dropRemovedPaths(binding)
   }
   return lost

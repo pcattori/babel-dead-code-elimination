@@ -968,3 +968,36 @@ describe("a class judged after a same-named binding was removed", () => {
     },
   )
 })
+
+describe("scopes after elimination", () => {
+  // Every scope's names, kinds and reference counts, in traversal order.
+  let scopes = (ast: Babel.File) => {
+    let out: string[] = []
+    traverse(ast, {
+      Scopable(path) {
+        if (path.scope.block !== path.node) return
+        let bindings = path.scope.bindings
+        out.push(
+          Object.keys(bindings)
+            .sort()
+            .map((n) => `${n}:${bindings[n]?.kind}:${bindings[n]?.references}`)
+            .join(","),
+        )
+      },
+    })
+    return out
+  }
+
+  test.each([
+    "export function g(cfg) {\n  { const cfg = 0 }\n  return () => cfg\n}",
+    "export function g() {\n  try {} catch (e) {\n    { const e = 0 }\n    return e\n  }\n}",
+    "export const f = function g() {\n  { const g = 0 }\n  return g\n}",
+  ])(
+    "equal a fresh crawl's when a nested block redeclares a name: %s",
+    (source) => {
+      let ast = parseModule(source)
+      deadCodeElimination(ast)
+      expect(scopes(ast)).toEqual(scopes(t.cloneNode(ast, true)))
+    },
+  )
+})
