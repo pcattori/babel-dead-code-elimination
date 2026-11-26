@@ -11,13 +11,22 @@ import { t, type NodePath, type Babel, type Binding } from "./babel-esm"
  * pattern that was empty to begin with.
  * @param classRunsCode - Whether defining a class runs code. Elimination
  * decides it before removing anything (see hasDefinitionSideEffects).
+ * @param localCalls - Whether a declaration in a function evaluates a call
+ * that keeps it (see callsInFunction), decided before removing anything.
  */
 export default function findRemovableBindings(
   scopePath: NodePath,
   isKept?: (binding: Binding) => boolean,
   classRunsCode: ClassRunsCode = hasDefinitionSideEffects,
+  localCalls: LocalCalls = callsInFunction,
 ): Set<Binding> {
-  const graph = buildReferenceGraph(scopePath, isKept, true, classRunsCode)
+  const graph = buildReferenceGraph(
+    scopePath,
+    isKept,
+    true,
+    classRunsCode,
+    localCalls,
+  )
   const removable = new Set<Binding>()
   if (!graph) return removable
   // Every binding left is reachable from nothing that elimination keeps, so it
@@ -163,6 +172,7 @@ function buildReferenceGraph(
   isKept?: (binding: Binding) => boolean,
   forElimination = false,
   classRunsCode: ClassRunsCode = hasDefinitionSideEffects,
+  localCalls: LocalCalls = callsInFunction,
 ):
   | { bindings: Binding[]; refs: (number[] | null)[]; excluded: Uint8Array }
   | undefined {
@@ -284,7 +294,7 @@ function buildReferenceGraph(
       isLoopIteratorBinding(binding) ||
       ((binding.path.isVariableDeclarator() ||
         binding.path.isClassDeclaration()) &&
-        callsInFunction(binding.path))
+        localCalls(binding.path))
     ) {
       excluded[i] = 1
       candidateCount--
@@ -497,6 +507,20 @@ export function isReferenced(binding: Binding): boolean {
 }
 
 export type ClassRunsCode = (path: NodePath<Babel.ClassDeclaration>) => boolean
+export type LocalCalls = (
+  path: NodePath<Babel.VariableDeclarator | Babel.ClassDeclaration>,
+) => boolean
+
+/** A call, `new`, tagged template or decorator that a declaration evaluates. */
+export type LocalCall = NodePath<
+  | Babel.CallExpression
+  | Babel.OptionalCallExpression
+  | Babel.NewExpression
+  | Babel.TaggedTemplateExpression
+  | Babel.Decorator
+>
+export type KeepLocalCall = (call: LocalCall) => boolean
+const keepEveryCall: KeepLocalCall = () => true
 
 /**
  * Whether defining the class runs code whose effects removal would drop:
@@ -572,18 +596,41 @@ export function isLoopIteratorBinding(binding: Binding): boolean {
  * computed keys, member decorators, static fields and static blocks; method
  * bodies and instance fields run later.
  */
-function classEvaluatesCall(node: Babel.Class): boolean {
-  if (node.decorators?.length || evaluatesCall(node.superClass)) return true
-  return node.body.body.some(
-    (member) =>
-      (t.isStaticBlock(member) && member.body.some(evaluatesCall)) ||
-      hasStandardDecorators(member) ||
-      ("computed" in member && member.computed && evaluatesCall(member.key)) ||
-      ((t.isClassProperty(member) ||
-        t.isClassPrivateProperty(member) ||
-        t.isClassAccessorProperty(member)) &&
-        member.static &&
-        evaluatesCall(member.value)),
+function classEvaluatesCall(
+  path: NodePath<Babel.Class>,
+  keep: KeepLocalCall,
+): boolean {
+  const calls = (child: NodePath<Babel.Node | null | undefined>) =>
+    evaluatesCall(child, keep)
+  if (decoratorsCall(path, keep) || calls(path.get("superClass"))) return true
+  return path
+    .get("body")
+    .get("body")
+    .some(
+      (member) =>
+        (member.isStaticBlock() && member.get("body").some(calls)) ||
+        (hasStandardDecorators(member.node) && decoratorsCall(member, keep)) ||
+        (member.has("computed") &&
+          (member.node as { computed?: boolean }).computed === true &&
+          calls(member.get("key") as NodePath<Babel.Node>)) ||
+        ((member.isClassProperty() ||
+          member.isClassPrivateProperty() ||
+          member.isClassAccessorProperty()) &&
+          member.node.static &&
+          calls(member.get("value") as NodePath<Babel.Node | null>)),
+    )
+}
+
+/** Whether applying a node's decorators evaluates a call it keeps for. */
+function decoratorsCall(path: NodePath, keep: KeepLocalCall): boolean {
+  const decorators = path.get("decorators")
+  return (
+    Array.isArray(decorators) &&
+    decorators.some(
+      (decorator) =>
+        keep(decorator as LocalCall) ||
+        evaluatesCall(decorator.get("expression") as NodePath, keep),
+    )
   )
 }
 
@@ -604,50 +651,58 @@ function hasStandardDecorators(member: Babel.Node): boolean {
 
 /**
  * Whether a declarator or class declaration inside a function evaluates a
- * call when it runs, in its
- * initializer or in its pattern's defaults and computed keys, directly or
- * nested (`useId()`, `useCtx().value`, `c ? useA() : 0`, `[useA()]`,
- * `{ id = useId() }`, `{ [useKey()]: a }`), including what a class or object
- * initializer evaluates when it is created (computed keys, `extends`, static
- * fields and blocks, standard decorators, whose application is a call), but
- * not in a nested function, method body or instance field (`() => useA()`
- * runs nothing). Such calls run on every invocation, and some
- * must run in the same order in every build: removing an unused
- * `const id = useId()` from a component only in the server build shifts
- * React's hook-based ids. Declarations like these are kept even when their
- * bindings are unused.
+ * call when it runs, in its initializer or in its pattern's defaults and
+ * computed keys, directly or nested (`useId()`, `useCtx().value`,
+ * `c ? useA() : 0`, `[useA()]`, `{ id = useId() }`, `{ [useKey()]: a }`),
+ * including what a class or object initializer evaluates when it is created
+ * (computed keys, `extends`, static fields and blocks, standard decorators,
+ * whose application is a call), but not in a nested function, method body or
+ * instance field (`() => useA()` runs nothing). A class declaration's static
+ * fields count like a constant's initializer. Such calls run on every
+ * invocation, and some must run in the same order in every build: removing an
+ * unused `const id = useId()` from a component only in the server build
+ * shifts React's hook-based ids. Declarations like these are kept even when
+ * their bindings are unused. `keep` narrows the calls that count (the
+ * caller's `keepLocalCall`); every call counts by default.
  */
 export function callsInFunction(
   path: NodePath<Babel.VariableDeclarator | Babel.ClassDeclaration>,
+  keep: KeepLocalCall = keepEveryCall,
 ): boolean {
   if (path.getFunctionParent() === null) return false
-  const node = path.node
-  // A class declaration's static fields are like a constant's initializer.
-  return t.isClassDeclaration(node)
-    ? classEvaluatesCall(node)
-    : evaluatesCall(node.init) || evaluatesCall(node.id)
+  return path.isClassDeclaration()
+    ? classEvaluatesCall(path, keep)
+    : evaluatesCall(path.get("init") as NodePath<Babel.Node | null>, keep) ||
+        evaluatesCall(path.get("id") as NodePath<Babel.Node>, keep)
 }
 
-function evaluatesCall(node: Babel.Node | null | undefined): boolean {
+function evaluatesCall(
+  path: NodePath<Babel.Node | null | undefined>,
+  keep: KeepLocalCall,
+): boolean {
+  const node = path.node
   if (!node) return false
   if (
-    t.isCallExpression(node) ||
-    t.isOptionalCallExpression(node) ||
-    t.isNewExpression(node) ||
-    t.isTaggedTemplateExpression(node)
+    (t.isCallExpression(node) ||
+      t.isOptionalCallExpression(node) ||
+      t.isNewExpression(node) ||
+      t.isTaggedTemplateExpression(node)) &&
+    keep(path as LocalCall)
   ) {
     return true
   }
   // Creating an object runs a method's computed key, not its body.
-  if (t.isObjectMethod(node)) return node.computed && evaluatesCall(node.key)
+  if (t.isObjectMethod(node))
+    return node.computed && evaluatesCall(path.get("key") as NodePath, keep)
   if (t.isFunction(node)) return false
-  if (t.isClass(node)) return classEvaluatesCall(node)
+  if (t.isClass(node))
+    return classEvaluatesCall(path as NodePath<Babel.Class>, keep)
   for (const key of t.VISITOR_KEYS[node.type]!) {
-    const child = (node as unknown as Record<string, unknown>)[key]
+    const child = path.get(key) as NodePath | NodePath[]
     if (
       Array.isArray(child)
-        ? child.some((element) => evaluatesCall(element as Babel.Node | null))
-        : evaluatesCall(child as Babel.Node | null)
+        ? child.some((element) => evaluatesCall(element, keep))
+        : evaluatesCall(child, keep)
     ) {
       return true
     }

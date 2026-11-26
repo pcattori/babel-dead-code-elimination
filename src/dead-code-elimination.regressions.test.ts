@@ -1085,3 +1085,77 @@ describe("static field initializers", () => {
     },
   )
 })
+
+describe("keepLocalCall", () => {
+  let isHook = (name: string) => /^use[A-Z]/.test(name)
+  let hookRule = (call: NodePath) => {
+    let node = call.node
+    let callee = t.isDecorator(node)
+      ? node.expression
+      : t.isTaggedTemplateExpression(node)
+        ? node.tag
+        : (node as Babel.CallExpression).callee
+    if (t.isIdentifier(callee)) return isHook(callee.name)
+    return (
+      t.isMemberExpression(callee) &&
+      !callee.computed &&
+      t.isIdentifier(callee.property) &&
+      isHook(callee.property.name)
+    )
+  }
+  let source = ts`
+    export function Page() {
+      const id = useId()
+      const state = React.useState(0)
+      const user = db.users.find(1)
+      const name = getSession().user.name
+      const K = class { static s = useMemo() }
+      return 1
+    }
+  `
+  let eliminate = (keepLocalCall?: (call: NodePath) => boolean) => {
+    let ast = parseModule(source)
+    deadCodeElimination(ast, undefined, { keepLocalCall })
+    return generate(ast).code
+  }
+
+  test("keeps only the locals whose calls the predicate accepts", () => {
+    expect(eliminate(hookRule)).toBe(ts`
+      export function Page() {
+        const id = useId();
+        const state = React.useState(0);
+        const K = class {
+          static s = useMemo();
+        };
+        return 1;
+      }
+    `)
+  })
+
+  test("keeps every call without the option", () => {
+    expect(eliminate()).toBe(unchanged(source))
+  })
+
+  test("receives each call and applied decorator, before any removal", () => {
+    let seen: string[] = []
+    let ast = parseModule(ts`
+      export function Page() {
+        const a = f(g())
+        const K = class { @register m() {} }
+        { const f = 0 }
+        return 1
+      }
+    `)
+    deadCodeElimination(ast, undefined, {
+      keepLocalCall: (call) => {
+        seen.push(`${call.node.type}:${call.scope.hasBinding("f")}`)
+        return false
+      },
+    })
+    expect(seen).toEqual([
+      "CallExpression:false",
+      "CallExpression:false",
+      "Decorator:false",
+    ])
+  })
+})

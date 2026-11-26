@@ -24,7 +24,23 @@ import findRemovableBindings, {
   isReferenced,
   isTypeOnlyExport,
   redeclarations,
+  type KeepLocalCall,
 } from "./find-removable-bindings"
+
+export type { LocalCall, KeepLocalCall } from "./find-removable-bindings"
+
+export interface DeadCodeEliminationOptions {
+  /**
+   * Which calls keep an otherwise unused declaration inside a function. A
+   * local whose declaration evaluates a call when it runs, such as
+   * `const id = useId()`, is kept by default, since removing it from one
+   * build only could change which hooks run. The predicate receives each
+   * call, `new`, tagged template and applied decorator such a declaration
+   * evaluates, before anything is removed; the declaration is kept when it
+   * accepts one. Without it, every call keeps its declaration.
+   */
+  keepLocalCall?: KeepLocalCall
+}
 
 const ELIMINATION_TYPES = new Set([
   "ImportDeclaration",
@@ -37,10 +53,12 @@ const ELIMINATION_TYPES = new Set([
 
 /**
  * @param candidates - If provided, only these identifiers will be candidates for dead code elimination.
+ * @param options - See {@link DeadCodeEliminationOptions}.
  */
 export default function (
   ast: ParseResult<Babel.File>,
   candidates?: Set<NodePath<Babel.Identifier>>,
+  options?: DeadCodeEliminationOptions,
 ) {
   let needsAnotherPass = false
   let programPath!: NodePath<Babel.Program>
@@ -100,7 +118,12 @@ export default function (
     if (scope !== programPath.scope) {
       removable = removableLocals.get(scope)!
       if (!removable) {
-        removable = findRemovableBindings(scope.path, isKept, runsCode)
+        removable = findRemovableBindings(
+          scope.path,
+          isKept,
+          runsCode,
+          localCalls,
+        )
         removableLocals.set(scope, removable)
       }
     }
@@ -170,7 +193,7 @@ export default function (
     if (path.isVariableDeclarator()) {
       let id = path.get("id")
       if (id.isIdentifier()) {
-        if (shouldBeRemoved(id) && !callsInFunction(path)) {
+        if (shouldBeRemoved(id) && !localCalls(path)) {
           willRemove()
           const again = redeclarations(getDeclaredBinding(id)!)
           path.remove()
@@ -186,7 +209,7 @@ export default function (
           // over removable cycles.
           if (Pattern.isRestFiltered(pattern.node, variable.node)) continue
           if (!shouldBeRemoved(variable)) continue
-          if (callsInFunction(path)) break
+          if (localCalls(path)) break
           markEmptied(variable)
           willRemove()
           // Keys that a removed rest no longer filters out may now go.
@@ -206,7 +229,7 @@ export default function (
       if (
         declarator &&
         !Pattern.isRestFiltered(declarator.node.id, node) &&
-        !callsInFunction(declarator) &&
+        !localCalls(declarator) &&
         (!hasCandidates || emptied.has(node))
       ) {
         willRemove()
@@ -241,7 +264,7 @@ export default function (
       id.isIdentifier() &&
       shouldBeRemoved(id) &&
       !runsCode(classPath) &&
-      !callsInFunction(classPath)
+      !localCalls(classPath)
     ) {
       willRemove()
       classPath.remove()
@@ -265,10 +288,30 @@ export default function (
     return result
   }
 
+  // Whether a declaration in a function evaluates a call that keeps it, also
+  // decided before anything is removed: the caller's predicate may read
+  // bindings that a removal makes Babel delete.
+  const localCallsDecided = new Map<Babel.Node, boolean>()
+  const localCalls = (
+    path: NodePath<Babel.VariableDeclarator | Babel.ClassDeclaration>,
+  ): boolean => {
+    let result = localCallsDecided.get(path.node)
+    if (result === undefined) {
+      result = callsInFunction(path, options?.keepLocalCall)
+      localCallsDecided.set(path.node, result)
+    }
+    return result
+  }
+
   const crawl = mustCrawlProgram(ast)
   programPath = getProgramPath(ast)
   if (crawl) crawlProgram(programPath)
-  removableBindings = findRemovableBindings(programPath, isKept, runsCode)
+  removableBindings = findRemovableBindings(
+    programPath,
+    isKept,
+    runsCode,
+    localCalls,
+  )
   const typeExports = findTypeOnlyExports(programPath)
   // Collect the declaration and pattern paths in source order without a Babel
   // traversal (see walk.ts).
@@ -277,7 +320,10 @@ export default function (
     (node) => ELIMINATION_TYPES.has(node.type),
     (path) => {
       paths.push(path)
-      if (path.isClassDeclaration()) runsCode(path)
+      if (path.isClassDeclaration()) {
+        runsCode(path)
+        localCalls(path)
+      } else if (path.isVariableDeclarator()) localCalls(path)
     },
   )
 
@@ -296,7 +342,12 @@ export default function (
     const lostReference = refreshBindings(snapshot!)
     if (!needsAnotherPass && !lostReference) break
     needsAnotherPass = false
-    removableBindings = findRemovableBindings(programPath, isKept, runsCode)
+    removableBindings = findRemovableBindings(
+      programPath,
+      isKept,
+      runsCode,
+      localCalls,
+    )
     removableLocals.clear()
   }
 

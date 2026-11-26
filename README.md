@@ -107,6 +107,62 @@ const startup = initializeApplication()
 
 `greeting` was referenced before the custom transform and became unused afterward, so it can be removed. `startup` was already unused, so it is preserved along with its potentially side-effectful initializer.
 
+### Choose which calls keep a declaration inside a function
+
+Inside a function, `deadCodeElimination` keeps an unused declaration whose
+initializer calls something, such as `const id = useId()`: removing it from
+one build only (for example the server build) can change which hooks run and
+break hydration. By default every call counts, including calls that only
+fetch data. Pass `keepLocalCall` to decide which calls keep their
+declaration. It receives the path of each call, `new`, tagged template and
+applied decorator that a declaration inside a function evaluates, before anything is
+removed:
+
+```ts
+import { deadCodeElimination } from "babel-dead-code-elimination"
+
+const isHookName = (name: string) => /^use[A-Z]/.test(name)
+
+export function transform(ast: AST) {
+  deadCodeElimination(ast, undefined, {
+    keepLocalCall: (call) => {
+      const node = call.node
+      const callee =
+        node.type === "Decorator"
+          ? node.expression
+          : node.type === "TaggedTemplateExpression"
+            ? node.tag
+            : node.callee
+      return (
+        (callee.type === "Identifier" && isHookName(callee.name)) ||
+        (callee.type === "MemberExpression" &&
+          callee.property.type === "Identifier" &&
+          isHookName(callee.property.name))
+      )
+    },
+  })
+}
+```
+
+For example:
+
+```ts
+// Before
+export function Page() {
+  const id = useId()
+  const user = getSession().user
+  return <Profile id={id} />
+}
+
+// After, with the hook rule above
+export function Page() {
+  const id = useId()
+  return <Profile id={id} />
+}
+```
+
+The second argument still takes the candidates, or `undefined` for none.
+
 ### Reuse scopes from an earlier traversal
 
 If a read-only Babel traversal has already initialized scopes, pass
