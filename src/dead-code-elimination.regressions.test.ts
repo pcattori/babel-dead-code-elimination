@@ -992,10 +992,11 @@ describe("scopes after elimination", () => {
     "export function g(cfg) {\n  { const cfg = 0 }\n  return () => cfg\n}",
     "export function g() {\n  try {} catch (e) {\n    { const e = 0 }\n    return e\n  }\n}",
     "export const f = function g() {\n  { const g = 0 }\n  return g\n}",
+    "const s = mk()\nconst t = 2\nconsole.log(t)\nexport type { s as t }",
   ])(
-    "equal a fresh crawl's when a nested block redeclares a name: %s",
+    "equal a fresh crawl's when a removal names another binding: %s",
     (source) => {
-      let ast = parseModule(source)
+      let ast = parseModule(source, true)
       deadCodeElimination(ast)
       expect(scopes(ast)).toEqual(scopes(t.cloneNode(ast, true)))
     },

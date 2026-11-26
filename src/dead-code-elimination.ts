@@ -302,8 +302,12 @@ export default function (
     if (binding.referencePaths.some(isSameNamedType)) continue
     const declaration =
       specifier.parentPath as NodePath<Babel.ExportNamedDeclaration>
-    specifier.remove()
-    if (declaration.node.specifiers.length === 0) declaration.remove()
+    // Removing the specifier's path would make Babel delete its exported
+    // name from scope, which can be another binding's
+    // (`export type { s as t }`), so it leaves the list directly.
+    const specifiers = declaration.node.specifiers
+    specifiers.splice(specifiers.indexOf(specifier.node), 1)
+    if (specifiers.length === 0) declaration.remove()
   }
 }
 
