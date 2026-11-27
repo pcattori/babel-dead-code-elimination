@@ -1,111 +1,83 @@
 import { t, type NodePath, type Babel, type Binding } from "./babel-esm"
-import { isRestFiltered } from "./pattern"
 
 /**
- * Finds bindings forming closed SCCs with no external references.
+ * Finds the bindings of a scope that nothing elimination keeps can reach,
+ * through references inside the scope's declarations. The scope is the
+ * program's, a function's or a block's: locals that only read each other are
+ * as dead as such module declarations (decision R2-D5).
+ * @param scopePath - A path whose scope is the one to analyze.
  * @param isKept - Bindings that elimination keeps regardless of references.
+ * Given exactly when elimination has candidates, which also keep every
+ * pattern that was empty to begin with.
+ * @param classRunsCode - Whether defining a class runs code. Elimination
+ * decides it before removing anything (see hasDefinitionSideEffects).
+ * @param localCalls - Whether a declaration in a function evaluates a call
+ * that keeps it (see callsInFunction), decided before removing anything.
  */
 export default function findRemovableBindings(
-  programPath: NodePath<Babel.Program>,
+  scopePath: NodePath,
   isKept?: (binding: Binding) => boolean,
+  classRunsCode: ClassRunsCode = hasDefinitionSideEffects,
+  localCalls: LocalCalls = callsInFunction,
 ): Set<Binding> {
-  // Babel keeps bindings in a dictionary-mode object, where Object.keys with
-  // indexed reads is several times faster than Object.values.
-  const bindingsByName = programPath.scope.bindings
-  const names = Object.keys(bindingsByName)
-  const allBindings = new Array<Binding>(names.length)
-  for (let i = 0; i < names.length; i++) {
-    allBindings[i] = bindingsByName[names[i]!]!
-  }
-  const n = allBindings.length
-  if (n === 0) return new Set()
-
-  // Build a graph of bindings for cycle detection (Tarjan's algorithm)
-  // if binding `a` is referenced inside binding `b`'s definition, refs[b] contains a
-  // Map each declaration node to the bindings it declares for fast lookup when
-  // tracing refs. A destructuring declarator declares several bindings.
-  const pathNodeToIdx = new Map<Babel.Node, number[]>()
-  const refs: (number[] | null)[] = new Array(n)
-  for (let i = 0; i < n; i++) {
-    const node = allBindings[i]!.path?.node
-    if (node) {
-      const indices = pathNodeToIdx.get(node)
-      if (indices) indices.push(i)
-      else pathNodeToIdx.set(node, [i])
-    }
-    refs[i] = null
-  }
-
-  // Mark bindings as excluded (not removable) if they have external refs, reassignments, are loop iterators, or are kept
-  const excluded = new Uint8Array(n)
-  // excluded bindings whose refs need to be excluded too
-  const exclusionQueue: number[] = []
-  // bindings that might be removable
-  let candidateCount = n
-
-  for (let i = 0; i < n; i++) {
-    const binding = allBindings[i]!
-
+  const graph = buildReferenceGraph(
+    scopePath,
+    isKept,
+    true,
+    classRunsCode,
+    localCalls,
+  )
+  const removable = new Set<Binding>()
+  if (!graph) return removable
+  // Every binding left is reachable from nothing that elimination keeps, so it
+  // is dead, whether it forms a cycle or is only referenced or reassigned by
+  // dead code. Unreferenced ones are removed anyway, so only referenced or
+  // reassigned ones are listed.
+  const { bindings, excluded } = graph
+  for (let i = 0; i < bindings.length; i++) {
+    const binding = bindings[i]!
     if (
-      binding.constantViolations.length > 0 ||
-      isLoopIteratorBinding(binding) ||
-      !isRemovableDeclaration(binding) ||
-      isRestFilteredBinding(binding) ||
-      isKept?.(binding)
+      !excluded[i] &&
+      (isReferenced(binding) || binding.constantViolations.length > 0)
     ) {
-      excluded[i] = 1
-      candidateCount--
-      exclusionQueue.push(i)
-      continue
-    }
-
-    for (const refPath of binding.referencePaths) {
-      if (isTypeOnlyReference(refPath)) continue
-      // Walk up the AST to find which binding (if any) contains this reference
-      let path: NodePath | null = refPath
-      let containers: number[] | undefined
-      while (path) {
-        containers = pathNodeToIdx.get(path.node)
-        if (containers !== undefined) break
-        path = path.parentPath
-      }
-      if (containers !== undefined) {
-        // Every binding of a declarator keeps its initializer alive.
-        for (const containerIdx of containers) {
-          const containerRefs = refs[containerIdx]
-          if (!containerRefs) {
-            refs[containerIdx] = [i]
-            // References to this target are processed together, so any duplicate
-            // edge is the last one appended to its containing declaration.
-          } else if (containerRefs[containerRefs.length - 1] !== i) {
-            containerRefs.push(i)
-          }
-        }
-      } else if (!excluded[i]) {
-        excluded[i] = 1
-        candidateCount--
-        exclusionQueue.push(i)
-        break
-      }
+      removable.add(binding)
     }
   }
+  return removable
+}
 
-  // Propagate exclusions: if excluded binding `a` references `b`, then `b` is also not removable
-  while (exclusionQueue.length > 0) {
-    const idx = exclusionQueue.pop()!
-    const targets = refs[idx]
-    if (targets) {
-      for (const target of targets) {
-        if (!excluded[target]) {
-          excluded[target] = 1
-          candidateCount--
-          exclusionQueue.push(target)
-        }
-      }
-    }
-  }
-
-  if (candidateCount === 0) return new Set()
+/**
+ * Finds the bindings that nothing kept reaches and that no binding outside
+ * their strongly connected component references: the members of closed dead
+ * cycles (a self-recursive function counts), and bindings nothing references
+ * at all. Reference collection leaves out the referenced ones among these,
+ * so a binding read only by other dead code stays a candidate that a later
+ * transform can make unreferenced. A key filtered out of an object rest is
+ * kept by the rest, so it counts as used only while the rest does. As in
+ * elimination, a default or computed key is read by its own element and a
+ * reassignment counts as a reference from the code doing it, so an element
+ * that only its own default reads, or a variable that only code it keeps
+ * reassigns, is in a closed cycle.
+ * @param keep - The caller's `keepLocalCall`, which decides, as in
+ * elimination, which calls keep a local in a function live.
+ */
+export function findDeadCycleBindings(
+  scopePath: NodePath,
+  keep?: KeepLocalCall,
+): Set<Binding> {
+  const removable = new Set<Binding>()
+  // With the caller's keepLocalCall, a local's calls keep it live exactly
+  // when elimination keeps it for them (decision R4-D1).
+  const graph = buildReferenceGraph(
+    scopePath,
+    undefined,
+    false,
+    (path) => classDeclarationRunsCode(path, keep),
+    (path) => callsInFunction(path, keep),
+  )
+  if (!graph) return removable
+  const { bindings, refs, excluded } = graph
+  const n = bindings.length
 
   // Tarjan's SCC algorithm finds cycles. Small candidate sets are not
   // special-cased: hand-written checks missed cycles such as a<->c, b<->c.
@@ -142,15 +114,15 @@ export default function findRemovableBindings(
         if (indices[w] === -1) {
           visit(w)
         } else if (onStack[w]) {
-          if (indices[w]! < lowlink[v]!) lowlink[v] = indices[w]!
+          lowlink[v] = Math.min(lowlink[v]!, indices[w]!)
         }
         continue
       }
 
       callStack.pop()
       const parent = callStack[callStack.length - 1]
-      if (parent !== undefined && lowlink[v]! < lowlink[parent]!) {
-        lowlink[parent] = lowlink[v]!
+      if (parent !== undefined) {
+        lowlink[parent] = Math.min(lowlink[parent]!, lowlink[v]!)
       }
 
       if (lowlink[v] === indices[v]) {
@@ -184,29 +156,267 @@ export default function findRemovableBindings(
   }
 
   // Collect removable bindings from closed SCCs (cycles with no external references)
-  const removable = new Set<Binding>()
-
   for (let compId = 0; compId < sccs.length; compId++) {
     // Removable only if no binding outside the SCC references it. The
     // referencing binding may be one that elimination keeps.
     if (hasIncoming[compId]) continue
-    const comp = sccs[compId]!
-    // SCC with one binding: only a cycle if it references itself (e.g. recursive fn)
-    if (comp.length === 1 && !refs[comp[0]!]?.includes(comp[0]!)) continue
-    for (const idx of comp) removable.add(allBindings[idx]!)
+    for (const idx of sccs[compId]!) removable.add(bindings[idx]!)
   }
-
   return removable
 }
 
+/**
+ * The program's bindings, the references inside each one's declaration, and
+ * which bindings are excluded: kept, read from outside every declaration, or
+ * reached from such a binding. Undefined when every binding is excluded.
+ * A reassignment inside a declaration counts like a reference from it, so
+ * that it keeps the variable only while the declaration is kept, and a
+ * reference in a destructuring default or computed key comes from the element
+ * it belongs to and the rests that filter that element out, since elimination
+ * removes it with the element.
+ * @param forElimination - Elimination's graph: with candidates, an
+ * already-empty pattern keeps what its declarator reads, and an element that
+ * binds nothing lends its reads to no binding. Reference collection, without
+ * candidates, lets such an element's reads come from the whole declarator, as
+ * it always did.
+ */
+function buildReferenceGraph(
+  scopePath: NodePath,
+  isKept: ((binding: Binding) => boolean) | undefined,
+  forElimination: boolean,
+  classRunsCode: ClassRunsCode,
+  localCalls: LocalCalls,
+):
+  | { bindings: Binding[]; refs: (number[] | null)[]; excluded: Uint8Array }
+  | undefined {
+  // Babel keeps bindings in a dictionary-mode object, where Object.keys with
+  // indexed reads is several times faster than Object.values.
+  const bindingsByName = scopePath.scope.bindings
+  const names = Object.keys(bindingsByName)
+  const allBindings = new Array<Binding>(names.length)
+  for (let i = 0; i < names.length; i++) {
+    allBindings[i] = bindingsByName[names[i]!]!
+  }
+  const n = allBindings.length
+  if (n === 0) return undefined
+
+  // if binding `a` is referenced inside binding `b`'s definition, refs[b] contains a
+  // Map each declaration node to the bindings it declares for fast lookup when
+  // tracing refs. A destructuring declarator declares several bindings.
+  const pathNodeToIdx = new Map<Babel.Node, number[]>()
+  const refs: (number[] | null)[] = new Array(n)
+  for (let i = 0; i < n; i++) {
+    const node = allBindings[i]!.path.node
+    const indices = pathNodeToIdx.get(node)
+    if (indices) indices.push(i)
+    else pathNodeToIdx.set(node, [i])
+    refs[i] = null
+    // A `var` redeclaration declares the same binding again: what it reads
+    // and its own reassignment come from that binding.
+    for (const redeclaration of redeclarations(allBindings[i]!))
+      pathNodeToIdx.set(redeclaration.node, [i])
+  }
+
+  // Reference collection: a kept rest keeps the keys listed before it, which
+  // count as used only while the rest does. Elimination keeps those keys
+  // itself while the rest stays.
+  if (!forElimination) {
+    const indexOf = new Map<Binding, number>()
+    for (let i = 0; i < n; i++) indexOf.set(allBindings[i]!, i)
+    for (let i = 0; i < n; i++) {
+      const binding = allBindings[i]!
+      const declarator = binding.path.node
+      if (!t.isVariableDeclarator(declarator)) continue
+      // A declarator's binding names one of its identifiers.
+      for (const rest of filteringRests(declarator.id, binding.identifier)!) {
+        const name = (rest as Babel.Identifier).name
+        ;(refs[indexOf.get(bindingsByName[name]!)!] ??= []).push(i)
+      }
+    }
+  }
+
+  // Mark bindings as excluded (not removable) if they have external refs or
+  // reassignments, or are kept: by candidates, as loop heads, or as locals
+  // whose declaration calls something when it runs (see callsInFunction).
+  const excluded = new Uint8Array(n)
+  // excluded bindings whose refs need to be excluded too
+  const exclusionQueue: number[] = []
+  // bindings that might be removable
+  let candidateCount = n
+
+  // Adds an edge to `target` from every binding whose declaration contains
+  // `site`. False when no declaration contains it.
+  const addEdges = (site: NodePath, target: number): boolean => {
+    let containers: number[] | undefined
+    // The path from `site` up to the declaration, the declaration excluded.
+    const chain: NodePath[] = []
+    for (let path: NodePath | null = site; path; path = path.parentPath) {
+      containers = pathNodeToIdx.get(path.node)
+      if (containers !== undefined) break
+      chain.push(path)
+    }
+    if (containers === undefined) return false
+    // Every binding of a declarator keeps its initializer alive; a default or
+    // computed key in its pattern only matters while its element stays.
+    const owner = findOwningElement(chain)
+    // Candidates keep every pattern that was empty to begin with, and so the
+    // element or declarator that holds one (`{ a, k: {} = x } = y`): its
+    // default or initializer is read from code that elimination keeps.
+    const container = allBindings[containers[0]!]!.path.node
+    if (
+      forElimination &&
+      isKept &&
+      t.isVariableDeclarator(container) &&
+      holdsEmptyPattern(owner?.element ?? container.id)
+    ) {
+      return false
+    }
+    if (
+      owner !== undefined &&
+      (forElimination || !bindsNothing(owner.element))
+    ) {
+      // The element's bindings, and the rests that keep it filtered out.
+      // Without candidates, elimination removes an element that binds nothing
+      // and that no rest filters in this pass, and its reads with it.
+      containers = containers.filter((idx) =>
+        [owner.element, ...owner.rests].some((pattern) =>
+          contains(pattern, allBindings[idx]!.identifier),
+        ),
+      )
+    }
+    for (const containerIdx of containers) {
+      const containerRefs = refs[containerIdx]
+      if (!containerRefs) {
+        refs[containerIdx] = [target]
+        // Sites of one target are processed together, so a duplicate edge
+        // from a site is the last one appended to its containing declaration
+        // (a rest's edges to its keys may repeat one; a repeat is harmless).
+      } else if (containerRefs[containerRefs.length - 1] !== target) {
+        containerRefs.push(target)
+      }
+    }
+    return true
+  }
+
+  for (let i = 0; i < n; i++) {
+    const binding = allBindings[i]!
+
+    if (
+      !isRemovableDeclaration(binding, classRunsCode) ||
+      isKept?.(binding) ||
+      isLoopIteratorBinding(binding) ||
+      ((binding.path.isVariableDeclarator() ||
+        binding.path.isClassDeclaration()) &&
+        localCalls(binding.path))
+    ) {
+      excluded[i] = 1
+      candidateCount--
+      exclusionQueue.push(i)
+      continue
+    }
+
+    // A reassignment, like a reference, keeps the binding alive only while
+    // the declaration that contains it is kept.
+    const reachable =
+      binding.constantViolations.every((site) => addEdges(site, i)) &&
+      binding.referencePaths.every(
+        (site) => isTypeOnlyReference(site) || addEdges(site, i),
+      )
+    if (!reachable) {
+      excluded[i] = 1
+      candidateCount--
+      exclusionQueue.push(i)
+    }
+  }
+
+  // Propagate exclusions: if excluded binding `a` references `b`, then `b` is also not removable
+  while (exclusionQueue.length > 0) {
+    const idx = exclusionQueue.pop()!
+    const targets = refs[idx]
+    if (targets) {
+      for (const target of targets) {
+        if (!excluded[target]) {
+          excluded[target] = 1
+          candidateCount--
+          exclusionQueue.push(target)
+        }
+      }
+    }
+  }
+
+  if (candidateCount === 0) return undefined
+  return { bindings: allBindings, refs, excluded }
+}
+
+/**
+ * The pattern element that owns a reference inside a declarator's id: the
+ * target of the outermost default (`{ a = x }`, `[{ a, b } = x]`) or the
+ * value of the outermost computed key (`{ [x]: a }`) that holds the
+ * reference, with the rest arguments of the object patterns that filter the
+ * element out (`{ a = x, ...rest }`). `chain` runs from the reference up to
+ * the declarator's `id`; it is empty when the site is the declaration itself,
+ * a `var` redeclaration. Undefined when the site is not in the id.
+ */
+function findOwningElement(
+  chain: NodePath[],
+): { element: Babel.Node; rests: Babel.Node[] } | undefined {
+  if (chain.at(-1)?.key !== "id") return undefined
+  const rests: Babel.Node[] = []
+  // A value inside a pattern sits in a default or a computed key (references
+  // in its type annotation are type-only), so the loop returns before it
+  // reaches the reference.
+  for (let k = chain.length - 1; ; k--) {
+    const node = chain[k]!.node
+    const child = chain[k - 1]!.node
+    if (t.isObjectPattern(node)) {
+      const last = node.properties.at(-1)
+      if (t.isRestElement(last) && last !== child) rests.push(last.argument)
+    }
+    if (t.isAssignmentPattern(node) && child === node.right)
+      return { element: node.left, rests }
+    if (t.isObjectProperty(node) && child === node.key)
+      return { element: node.value, rests }
+  }
+}
+
+/** Whether a pattern is or holds an empty object or array pattern. */
+function holdsEmptyPattern(node: Babel.Node | null): boolean {
+  if (t.isObjectPattern(node)) {
+    return (
+      node.properties.length === 0 ||
+      // An object rest binds a name: its `value` is undefined.
+      node.properties.some((property) =>
+        holdsEmptyPattern((property as Babel.ObjectProperty).value),
+      )
+    )
+  }
+  if (t.isArrayPattern(node)) {
+    return (
+      node.elements.every((element) => element === null) ||
+      node.elements.some(holdsEmptyPattern)
+    )
+  }
+  if (t.isAssignmentPattern(node)) return holdsEmptyPattern(node.left)
+  if (t.isRestElement(node)) return holdsEmptyPattern(node.argument)
+  return false
+}
+
+const bindsNothing = (pattern: Babel.Node) =>
+  Object.keys(t.getBindingIdentifiers(pattern)).length === 0
+
+/** Whether `identifier` is one of the names `pattern` binds. */
+const contains = (pattern: Babel.Node, identifier: Babel.Identifier) =>
+  t.getBindingIdentifiers(pattern)[identifier.name] === identifier
+
 // Elimination only removes these declarations. Any other binding (such as a
 // TypeScript enum) is kept and keeps everything it references alive.
-function isRemovableDeclaration(binding: Binding): boolean {
+function isRemovableDeclaration(
+  binding: Binding,
+  classRunsCode: ClassRunsCode,
+): boolean {
   switch (binding.path.type) {
     case "ClassDeclaration":
-      return !hasDefinitionSideEffects(
-        binding.path as NodePath<Babel.ClassDeclaration>,
-      )
+      return !classRunsCode(binding.path as NodePath<Babel.ClassDeclaration>)
     case "VariableDeclarator":
     case "FunctionDeclaration":
     case "ImportSpecifier":
@@ -217,27 +427,87 @@ function isRemovableDeclaration(binding: Binding): boolean {
   return false
 }
 
-// Elimination keeps object pattern properties that are filtered out of a rest
-// element, even when they are unused.
-function isRestFilteredBinding(binding: Binding): boolean {
-  const declarator = binding.path.node
-  return (
-    t.isVariableDeclarator(declarator) &&
-    isRestFiltered(declarator.id, binding.identifier)
-  )
+/**
+ * The rest arguments of the object patterns in `node` that filter `target`
+ * out (`{ a, ...rest }` for `a`), or undefined when `target` is not in `node`.
+ */
+function filteringRests(
+  node: Babel.Node | null | undefined,
+  target: Babel.Node,
+  rests: Babel.Node[] = [],
+): Babel.Node[] | undefined {
+  // A hole (null) is neither the target nor a pattern, so it finds nothing.
+  if (node === target) return rests
+  if (t.isObjectPattern(node)) {
+    const last = node.properties.at(-1)
+    const inner = t.isRestElement(last) ? [...rests, last.argument] : rests
+    for (const property of node.properties) {
+      const result = t.isRestElement(property)
+        ? filteringRests(property.argument, target, rests)
+        : filteringRests(property.value, target, inner)
+      if (result) return result
+    }
+    return undefined
+  }
+  if (t.isArrayPattern(node)) {
+    for (const element of node.elements) {
+      const result = filteringRests(element, target, rests)
+      if (result) return result
+    }
+    return undefined
+  }
+  if (t.isAssignmentPattern(node))
+    return filteringRests(node.left, target, rests)
+  if (t.isRestElement(node)) return filteringRests(node.argument, target, rests)
+  return undefined
 }
+
+// Nodes whose child names a value only in a type: `typeof x`, `T<x.y>`,
+// `implements x`, `interface I extends x`, and computed keys in types
+// (`{ [x]: T }`, `{ [x.y](): T }`).
+const TYPE_REFERENCE_PARENTS = new Set([
+  "TSTypeQuery",
+  "TSTypeReference",
+  "TSExpressionWithTypeArguments",
+  "TSInterfaceHeritage",
+  "TSClassImplements",
+  "TSPropertySignature",
+  "TSMethodSignature",
+])
 
 /**
  * Babel counts the name of a same-named TypeScript type alias, interface or
- * overload signature as a reference to a value binding. These disappear with
+ * overload signature, a name used in a type (`typeof x`, a computed key) and
+ * a type-only export as a reference to a value binding. These disappear with
  * the types and never read the value.
  */
 function isTypeOnlyReference(path: NodePath): boolean {
-  return (
+  // A reference is never the Program, so it always has a parent.
+  let parent: NodePath = path.parentPath!
+  if (
     path.key === "id" &&
-    (path.parentPath?.isTSTypeAliasDeclaration() ||
-      path.parentPath?.isTSInterfaceDeclaration() ||
-      path.parentPath?.isTSDeclareFunction()) === true
+    (parent.isTSTypeAliasDeclaration() ||
+      parent.isTSInterfaceDeclaration() ||
+      parent.isTSDeclareFunction())
+  ) {
+    return true
+  }
+  if (parent.isExportSpecifier()) return isTypeOnlyExport(parent)
+  // Climb the dotted name the reference starts: `x.y` in a type is a
+  // qualified name, and in a computed key a member expression.
+  while (parent.isTSQualifiedName() || parent.isMemberExpression()) {
+    parent = parent.parentPath!
+  }
+  return TYPE_REFERENCE_PARENTS.has(parent.type)
+}
+
+/** Whether an export specifier exports only a type: `export type { s }`, `export { type s }`. */
+export function isTypeOnlyExport(
+  specifier: NodePath<Babel.ExportSpecifier>,
+): boolean {
+  return (
+    specifier.node.exportKind === "type" ||
+    (specifier.parent as Babel.ExportNamedDeclaration).exportKind === "type"
   )
 }
 
@@ -249,11 +519,34 @@ export function isReferenced(binding: Binding): boolean {
   )
 }
 
+export type ClassRunsCode = (path: NodePath<Babel.ClassDeclaration>) => boolean
+export type LocalCalls = (
+  path: NodePath<Babel.VariableDeclarator | Babel.ClassDeclaration>,
+) => boolean
+
+/** A call, `new`, tagged template or decorator that a declaration evaluates. */
+export type LocalCall = NodePath<
+  | Babel.CallExpression
+  | Babel.OptionalCallExpression
+  | Babel.NewExpression
+  | Babel.TaggedTemplateExpression
+  | Babel.Decorator
+>
+export type KeepLocalCall = (call: LocalCall) => boolean
+const keepEveryCall: KeepLocalCall = () => true
+
 /**
  * Whether defining the class runs code whose effects removal would drop:
  * decorators (which commonly register the class), static blocks, impure
- * static initializers or computed keys, or an `extends` clause other than a
- * (dotted) name.
+ * computed keys, or an `extends` clause other than a (dotted) name. A static
+ * field's initializer is like a constant's: it keeps nothing at the module
+ * level, and in a function it keeps the class like a local whose
+ * initializer calls (see callsInFunction). Only standard decorators count: on the class, a method with
+ * a body, an accessor or a field that is neither `declare` nor abstract.
+ * Legacy (`experimentalDecorators`) decorators are not supported, so a
+ * decorator on a parameter, an overload signature, an abstract member or a
+ * `declare` field counts for nothing. Such members are erased, so their
+ * computed keys run nothing either.
  */
 export function hasDefinitionSideEffects(
   path: NodePath<Babel.ClassDeclaration>,
@@ -263,28 +556,30 @@ export function hasDefinitionSideEffects(
   if (node.superClass && !isName(node.superClass)) return true
   for (const member of node.body.body) {
     if (t.isStaticBlock(member)) return true
-    if ("decorators" in member && member.decorators?.length) return true
+    if (isBodiless(member)) continue
+    if (hasStandardDecorators(member)) return true
     if ("computed" in member && member.computed && !scope.isPure(member.key)) {
-      return true
-    }
-    if (
-      (t.isClassProperty(member) ||
-        t.isClassPrivateProperty(member) ||
-        t.isClassAccessorProperty(member)) &&
-      member.static &&
-      member.value &&
-      !scope.isPure(member.value)
-    ) {
-      return true
-    }
-    if (
-      (t.isClassMethod(member) || t.isTSDeclareMethod(member)) &&
-      member.params.some((param) => param.decorators?.length)
-    ) {
       return true
     }
   }
   return false
+}
+
+/**
+ * Whether defining a class declaration keeps it when nothing reads it. With
+ * the caller's `keepLocalCall`, a class declaration inside a function is
+ * judged like a class expression local instead (decision R4-D2): by the
+ * calls it evaluates that the option accepts (see callsInFunction), not by
+ * other code its definition runs, so `class Repo { static { db.connect() } }`
+ * goes from a component when the option keeps only hooks. Everywhere else,
+ * and without the option, see hasDefinitionSideEffects.
+ */
+export function classDeclarationRunsCode(
+  path: NodePath<Babel.ClassDeclaration>,
+  keep?: KeepLocalCall,
+): boolean {
+  if (keep !== undefined && path.getFunctionParent() !== null) return false
+  return hasDefinitionSideEffects(path)
 }
 
 const isName = (node: Babel.Node): boolean =>
@@ -304,13 +599,165 @@ export function getDeclaredBinding(
   return scope.getBinding(ident.node.name)
 }
 
+/**
+ * The statements that declare a `var` binding again with a plain name
+ * (`var x = a; var x`), which elimination removes with the binding.
+ */
+export function redeclarations(
+  binding: Binding,
+): NodePath<Babel.VariableDeclarator>[] {
+  if (binding.kind !== "var" || !binding.path.isVariableDeclarator()) return []
+  return binding.constantViolations.filter(
+    (path): path is NodePath<Babel.VariableDeclarator> =>
+      path.isVariableDeclarator() &&
+      t.isIdentifier(path.node.id) &&
+      !isLoopHead(path.parentPath),
+  )
+}
+
+/**
+ * Whether a declaration is a loop's head (`for (var x of y)`,
+ * `for (var x = 0; ...)`), not a statement, which can stand anywhere a
+ * statement can: in a block, a `switch` case, a label, or the braceless body
+ * of an `if` or a loop.
+ */
+function isLoopHead(declaration: NodePath): boolean {
+  return declaration.parentPath!.isFor() && declaration.key !== "body"
+}
+
 export function isLoopIteratorBinding(binding: Binding): boolean {
-  if (binding.path.type === "VariableDeclarator") {
-    const declPath = binding.path.parentPath
+  // Only a for-in or for-of head holds a declaration under the key `left`.
+  return (
+    binding.path.isVariableDeclarator() &&
+    binding.path.parentPath.key === "left"
+  )
+}
+
+/**
+ * What defining a class evaluates: its decorators' application, `extends`,
+ * computed keys, member decorators, static fields and static blocks; method
+ * bodies and instance fields run later.
+ */
+function classEvaluatesCall(
+  path: NodePath<Babel.Class>,
+  keep: KeepLocalCall,
+): boolean {
+  const calls = (child: NodePath<Babel.Node | null | undefined>) =>
+    evaluatesCall(child, keep)
+  if (decoratorsCall(path, keep) || calls(path.get("superClass"))) return true
+  return path
+    .get("body")
+    .get("body")
+    .some(
+      (member) =>
+        (member.isStaticBlock() && member.get("body").some(calls)) ||
+        (hasStandardDecorators(member.node) && decoratorsCall(member, keep)) ||
+        (!isBodiless(member.node) &&
+          member.has("computed") &&
+          (member.node as { computed?: boolean }).computed === true &&
+          calls(member.get("key") as NodePath<Babel.Node>)) ||
+        ((member.isClassProperty() ||
+          member.isClassPrivateProperty() ||
+          member.isClassAccessorProperty()) &&
+          member.node.static &&
+          calls(member.get("value") as NodePath<Babel.Node | null>)),
+    )
+}
+
+/** Whether applying a node's decorators evaluates a call it keeps for. */
+function decoratorsCall(path: NodePath, keep: KeepLocalCall): boolean {
+  const decorators = path.get("decorators")
+  return (
+    Array.isArray(decorators) &&
+    decorators.some(
+      (decorator) =>
+        keep(decorator as LocalCall) ||
+        evaluatesCall(decorator.get("expression") as NodePath, keep),
+    )
+  )
+}
+
+/**
+ * Whether a class member carries standard decorators: on a method with a
+ * body, an accessor or a field that is neither `declare` nor abstract.
+ * Legacy (`experimentalDecorators`) decorators are not supported.
+ */
+function hasStandardDecorators(member: Babel.Node): boolean {
+  return (
+    "decorators" in member && !!member.decorators?.length && !isBodiless(member)
+  )
+}
+
+/**
+ * Whether a class member has no body: an overload signature, an abstract
+ * member or a `declare` field. Compilation erases it with its decorators and
+ * computed key, so defining the class runs neither.
+ */
+function isBodiless(member: Babel.Node): boolean {
+  return (
+    t.isTSDeclareMethod(member) ||
+    ("declare" in member && member.declare === true) ||
+    ("abstract" in member && member.abstract === true)
+  )
+}
+
+/**
+ * Whether a declarator or class declaration inside a function evaluates a
+ * call when it runs, in its initializer or in its pattern's defaults and
+ * computed keys, directly or nested (`useId()`, `useCtx().value`,
+ * `c ? useA() : 0`, `[useA()]`, `{ id = useId() }`, `{ [useKey()]: a }`),
+ * including what a class or object initializer evaluates when it is created
+ * (computed keys, `extends`, static fields and blocks, standard decorators,
+ * whose application is a call), but not in a nested function, method body or
+ * instance field (`() => useA()` runs nothing). A class declaration's static
+ * fields count like a constant's initializer. Such calls run on every
+ * invocation, and some must run in the same order in every build: removing an
+ * unused `const id = useId()` from a component only in the server build
+ * shifts React's hook-based ids. Declarations like these are kept even when
+ * their bindings are unused. `keep` narrows the calls that count (the
+ * caller's `keepLocalCall`); every call counts by default. It is called on
+ * the declaration's calls in source order until it accepts one.
+ */
+export function callsInFunction(
+  path: NodePath<Babel.VariableDeclarator | Babel.ClassDeclaration>,
+  keep: KeepLocalCall = keepEveryCall,
+): boolean {
+  if (path.getFunctionParent() === null) return false
+  return path.isClassDeclaration()
+    ? classEvaluatesCall(path, keep)
+    : // In source order: the pattern's defaults and computed keys, then the
+      // initializer (decision R4-D3).
+      evaluatesCall(path.get("id") as NodePath<Babel.Node>, keep) ||
+        evaluatesCall(path.get("init") as NodePath<Babel.Node | null>, keep)
+}
+
+function evaluatesCall(
+  path: NodePath<Babel.Node | null | undefined>,
+  keep: KeepLocalCall,
+): boolean {
+  const node = path.node
+  if (!node) return false
+  if (
+    (t.isCallExpression(node) ||
+      t.isOptionalCallExpression(node) ||
+      t.isNewExpression(node) ||
+      t.isTaggedTemplateExpression(node)) &&
+    keep(path as LocalCall)
+  ) {
+    return true
+  }
+  // Creating an object runs a method's computed key, not its body.
+  if (t.isObjectMethod(node))
+    return node.computed && evaluatesCall(path.get("key") as NodePath, keep)
+  if (t.isFunction(node)) return false
+  if (t.isClass(node))
+    return classEvaluatesCall(path as NodePath<Babel.Class>, keep)
+  for (const key of t.VISITOR_KEYS[node.type]!) {
+    const child = path.get(key) as NodePath | NodePath[]
     if (
-      declPath?.key === "left" &&
-      (declPath.parent.type === "ForOfStatement" ||
-        declPath.parent.type === "ForInStatement")
+      Array.isArray(child)
+        ? child.some((element) => evaluatesCall(element, keep))
+        : evaluatesCall(child, keep)
     ) {
       return true
     }

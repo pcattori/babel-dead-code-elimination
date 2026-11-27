@@ -23,15 +23,15 @@ outside the timed loop (`consuming.ts`).
 ## Compare a change against a baseline
 
 ```sh
-pnpm bench:baseline                               # on the base commit
-pnpm bench --compare benchmarks/baseline.json      # on the change
+pnpm bench:baseline   # on the base commit: writes benchmarks/baseline.json
+pnpm bench:compare    # on the change: writes benchmarks/change.json and compares
 ```
 
-`benchmarks/baseline.json` holds the committed baseline, with file paths
-relative to the repository. Run benchmarks
-sequentially on an otherwise idle machine; results from different machines
-are not comparable. Compare a baseline against itself once to see the noise
-level before trusting small differences.
+`bench:compare` prints each benchmark's mean time before and after, and the
+geometric mean of the ratios per benchmark file. The scripts run benchmark files one at a time
+(`--no-file-parallelism`); still run them on an otherwise idle machine; results from different machines are not
+comparable. Compare a baseline against itself once to see the noise level
+before trusting small differences.
 
 ## Output parity
 

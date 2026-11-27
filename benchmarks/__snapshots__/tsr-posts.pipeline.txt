@@ -3,7 +3,6 @@ import { createFileRoute, Link, notFound, useRouter } from "@tanstack/react-rout
 import { createServerFn } from "@tanstack/react-start";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { z } from "zod";
-import * as schema from "~/server/schema";
 import { Button } from "~/components/ui/button";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "~/components/ui/dialog";
 import { DataTable, type ColumnDef } from "~/components/data-table";

@@ -8,26 +8,19 @@ export function findVariables(
   function recurse(path: NodePath<Node | null>): void {
     if (path.isIdentifier()) {
       variables.push(path)
-      return
+    } else if (path.isObjectPattern()) {
+      path.get("properties").forEach(recurse)
+    } else if (path.isObjectProperty()) {
+      recurse(path.get("value"))
+    } else if (path.isArrayPattern()) {
+      path.get("elements").forEach(recurse)
+    } else if (path.isAssignmentPattern()) {
+      recurse(path.get("left"))
+    } else if (path.isRestElement()) {
+      recurse(path.get("argument"))
+    } else if (path.node !== null) {
+      throw unexpected(path)
     }
-    if (path.isObjectPattern()) {
-      return path.get("properties").forEach(recurse)
-    }
-    if (path.isObjectProperty()) {
-      return recurse(path.get("value"))
-    }
-    if (path.isArrayPattern()) {
-      let _elements = path.get("elements")
-      return _elements.forEach(recurse)
-    }
-    if (path.isAssignmentPattern()) {
-      return recurse(path.get("left"))
-    }
-    if (path.isRestElement()) {
-      return recurse(path.get("argument"))
-    }
-    if (path.node === null) return
-    throw unexpected(path)
   }
   recurse(patternPath)
   return variables
@@ -83,8 +76,10 @@ export function findDeclarator(
   path: NodePath<t.ObjectPattern | t.ArrayPattern>,
 ): NodePath<t.VariableDeclarator> | null {
   let child: NodePath = path
-  let parent: NodePath | null = path.parentPath
-  while (parent) {
+  // A pattern is never the program, so every link up to a declarator or to a
+  // node that is not part of a pattern has a parent.
+  let parent: NodePath = path.parentPath
+  for (;;) {
     if (parent.isVariableDeclarator()) {
       // A for-in/of head needs its declaration: `for (const {} of items)`.
       let isLoopHead = parent.parentPath.key === "left"
@@ -98,35 +93,36 @@ export function findDeclarator(
       parent.isRestElement()
     if (!isPatternLink) return null
     child = parent
-    parent = parent.parentPath
+    parent = parent.parentPath!
   }
-  return null
 }
 
-export function remove(path: NodePath<t.ObjectPattern | t.ArrayPattern>) {
+/**
+ * Removes a variable or an emptied pattern from the declaration pattern that
+ * holds it: its property, its array element (leaving a hole, so later
+ * elements keep their positions), or its rest element.
+ */
+export function remove(
+  path: NodePath<t.Identifier | t.ObjectPattern | t.ArrayPattern>,
+) {
   let parent = path.parentPath
-  if (parent.isVariableDeclarator()) {
-    return parent.remove()
-  }
-  if (parent.isArrayPattern()) {
+  if (
+    parent.isVariableDeclarator() ||
+    parent.isObjectProperty() ||
+    parent.isRestElement()
+  ) {
+    parent.remove()
+  } else if (parent.isArrayPattern()) {
     parent.node.elements[path.key as number] = null
-    return
-  }
-  if (parent.isObjectProperty()) {
-    return parent.remove()
-  }
-  if (parent.isRestElement()) {
-    return parent.remove()
-  }
-  if (parent.isAssignmentPattern()) {
+  } else if (parent.isAssignmentPattern()) {
     if (t.isObjectProperty(parent.parent)) {
-      return parent.parentPath.remove()
-    }
-    if (t.isArrayPattern(parent.parent)) {
+      parent.parentPath.remove()
+    } else if (t.isArrayPattern(parent.parent)) {
       parent.parent.elements[parent.key as number] = null
-      return
+    } else {
+      throw unexpected(parent.parentPath)
     }
-    throw unexpected(parent.parentPath)
+  } else {
+    throw unexpected(parent)
   }
-  throw unexpected(parent)
 }

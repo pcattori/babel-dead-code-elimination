@@ -4,7 +4,7 @@ import generate from "@babel/generator"
 import ts from "dedent"
 import * as prettier from "prettier"
 
-import { traverse, Babel } from "./babel-esm"
+import { traverse, Babel, type NodePath } from "./babel-esm"
 import deadCodeElimination from "./dead-code-elimination"
 import findReferencedIdentifiers from "./find-referenced-identifiers"
 
@@ -217,23 +217,14 @@ describe("variable", () => {
   DECLARATIONS.forEach((decl) => {
     test(`within for...in: ${decl}`, async () => {
       let source = `for (${decl} a in b) {}`
-      expect(await dce(source)).toMatchInlineSnapshot(`
-        "for (${decl} a in b) {
-        }
-        "
-      `)
+      expect(await dce(source)).toBe(`for (${decl} a in b) {\n}\n`)
     })
   })
 
   DECLARATIONS.forEach((decl) => {
     test(`within for...of: ${decl}`, async () => {
       let source = `for (${decl} a of b) {}`
-
-      expect(await dce(source)).toMatchInlineSnapshot(`
-        "for (${decl} a of b) {
-        }
-        "
-      `)
+      expect(await dce(source)).toBe(`for (${decl} a of b) {\n}\n`)
     })
   })
 
@@ -639,6 +630,32 @@ test("empty candidates set keeps all identifiers", async () => {
     "let unused = 1
     let used = 2
     ref(used)
+    "
+  `)
+})
+
+test("candidates keep patterns that were already empty", async () => {
+  let source = ts`
+    const {} = init()
+    const [] = start()
+    const { a: {} } = load()
+    const { b } = read()
+    const [c] = list()
+  `
+  let ast = parse(source, { sourceType: "module" })
+  let candidates = new Set<NodePath<Babel.Identifier>>()
+  traverse(ast, {
+    Identifier(path) {
+      if (path.node.name === "b" || path.node.name === "c") candidates.add(path)
+    },
+  })
+  deadCodeElimination(ast, candidates)
+  expect(await format(generate(ast).code)).toMatchInlineSnapshot(`
+    "const {} = init()
+    const [] = start()
+    const {
+      a: {},
+    } = load()
     "
   `)
 })

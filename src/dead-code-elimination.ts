@@ -4,10 +4,10 @@ import {
   type Babel,
   type ParseResult,
   type Binding,
+  type Scope,
 } from "./babel-esm"
 import * as Pattern from "./pattern"
 import { forEachMatchingPath, getProgramPath } from "./walk"
-import { unexpected } from "./errors"
 import {
   crawlProgram,
   isAttached,
@@ -17,11 +17,33 @@ import {
   type BindingSnapshot,
 } from "./scope"
 import findRemovableBindings, {
+  callsInFunction,
   getDeclaredBinding,
-  hasDefinitionSideEffects,
+  classDeclarationRunsCode,
   isLoopIteratorBinding,
   isReferenced,
+  isTypeOnlyExport,
+  redeclarations,
+  type KeepLocalCall,
 } from "./find-removable-bindings"
+
+export type { LocalCall, KeepLocalCall } from "./find-removable-bindings"
+
+export interface DeadCodeEliminationOptions {
+  /**
+   * Which calls keep an otherwise unused declaration inside a function. A
+   * local whose declaration evaluates a call when it runs, such as
+   * `const id = useId()`, is kept by default, since removing it from one
+   * build only could change which hooks run. The predicate receives the
+   * calls, `new` expressions, tagged templates and applied decorators such a
+   * declaration evaluates, in source order until it accepts one, before
+   * anything is removed; the declaration is kept when it accepts one. A class declaration inside a function is then judged like a
+   * class expression, by those calls alone: a static block or decorator whose
+   * calls it rejects no longer keeps it. Without the option, every call keeps
+   * its declaration.
+   */
+  keepLocalCall?: KeepLocalCall
+}
 
 const ELIMINATION_TYPES = new Set([
   "ImportDeclaration",
@@ -34,41 +56,81 @@ const ELIMINATION_TYPES = new Set([
 
 /**
  * @param candidates - If provided, only these identifiers will be candidates for dead code elimination.
+ * @param options - See {@link DeadCodeEliminationOptions}.
  */
 export default function (
   ast: ParseResult<Babel.File>,
   candidates?: Set<NodePath<Babel.Identifier>>,
+  options?: DeadCodeEliminationOptions,
 ) {
   let needsAnotherPass = false
   let programPath!: NodePath<Babel.Program>
   const paths: Array<NodePath> = []
 
-  // Bindings that form closed cycles (SCCs) with no external references
+  // Bindings of the program that nothing elimination keeps reaches, and those
+  // of other scopes, found when a pass first meets one of their declarations
   let removableBindings: Set<Binding>
+  const removableLocals = new Map<Scope, Set<Binding>>()
   let snapshot: BindingSnapshot | undefined
 
-  const hasCandidates = candidates !== undefined
+  // Candidates are matched by node: a transform that rebuilds a declaration
+  // around its own id node gives the id a new path, but it stays a candidate.
+  let candidateNodes: Set<Babel.Node> | undefined
+  if (candidates !== undefined) {
+    candidateNodes = new Set()
+    for (const candidate of candidates) candidateNodes.add(candidate.node)
+  }
+  const hasCandidates = candidateNodes !== undefined
   // Elimination keeps bindings outside the candidate set, so they must keep
   // everything they reference alive, including members of reference cycles.
-  let isKept: ((binding: Binding) => boolean) | undefined
-  if (hasCandidates) {
-    const candidateNodes = new Set<Babel.Node>()
-    for (const candidate of candidates) candidateNodes.add(candidate.node)
-    isKept = (binding) => !candidateNodes.has(binding.identifier)
+  const isKept = candidateNodes
+    ? (binding: Binding) => !candidateNodes.has(binding.identifier)
+    : undefined
+  // Patterns that elimination emptied. With candidates, a pattern that was
+  // empty to begin with (`const {} = init()`) is kept with its initializer.
+  const emptied = new WeakSet<Babel.Node>()
+  const markEmptied = (path: NodePath) => {
+    for (
+      let p = path.parentPath;
+      p && !p.isVariableDeclarator();
+      p = p.parentPath
+    ) {
+      if (p.isObjectPattern() || p.isArrayPattern()) emptied.add(p.node)
+    }
   }
   const shouldBeRemoved = (ident: NodePath<Babel.Identifier>): boolean => {
-    if (hasCandidates && !candidates.has(ident)) return false
+    if (candidateNodes && !candidateNodes.has(ident.node)) return false
 
     const binding = getDeclaredBinding(ident)
 
     // Only remove a declaration whose own binding is known. Removing a sole
     // declarator also removes its declaration, and Babel deletes the name
     // from scope for both, so the second deletion can drop a same-named
-    // binding of an enclosing scope until the next crawl.
-    if (binding?.identifier !== ident.node) return false
+    // binding of an enclosing scope until the bindings are refreshed. Such a
+    // declaration is decided in another pass. A `var` redeclaration is not
+    // its binding's own declaration either: it goes with the declaration
+    // that made the binding.
+    if (binding?.identifier !== ident.node) {
+      needsAnotherPass = true
+      return false
+    }
 
-    // If binding is part of a removable cycle, allow removal
-    if (removableBindings.has(binding)) return true
+    // If nothing that elimination keeps reaches the binding, allow removal
+    const scope = binding.scope
+    let removable = removableBindings
+    if (scope !== programPath.scope) {
+      removable = removableLocals.get(scope)!
+      if (!removable) {
+        removable = findRemovableBindings(
+          scope.path,
+          isKept,
+          runsCode,
+          localCalls,
+        )
+        removableLocals.set(scope, removable)
+      }
+    }
+    if (removable.has(binding)) return true
 
     if (isReferenced(binding)) return false
 
@@ -81,12 +143,19 @@ export default function (
     return true
   }
 
-  // Call before removing anything but imports. Such a removal can make other
-  // declarations unused, so another pass follows, and it can make Babel drop
-  // unrelated bindings by name, so bindings are recorded before the first one.
+  // Call before removing anything but imports. Such a removal can make Babel
+  // drop unrelated bindings by name, so bindings are recorded before the first
+  // one. Whether it can let another pass remove more is decided after the pass,
+  // from the references it dropped (see refreshBindings).
+  let removedAny = false
   const willRemove = (): void => {
-    needsAnotherPass = true
+    removedAny = true
     snapshot ??= snapshotBindings(programPath)
+  }
+  // Call when a removal changes a pattern without dropping a reference: an
+  // emptied enclosing pattern, or keys no longer filtered out of a rest.
+  const reshapedPattern = (): void => {
+    needsAnotherPass = true
   }
 
   const visit = (path: NodePath): void => {
@@ -96,13 +165,30 @@ export default function (
       if (path.node.specifiers.length === 0) {
         return
       }
+      let removedValue = false
       for (let specifier of path.get("specifiers")) {
         let local = specifier.get("local")
         if (shouldBeRemoved(local)) {
           specifier.remove()
+          removedValue = true
         }
       }
-      if (path.node.specifiers.length === 0) {
+      // A value import left with only type specifiers would still load its
+      // module where types are kept as imports (`verbatimModuleSyntax` emits
+      // `import {} from "./db.server"`), so it goes with its last value. An
+      // `import type` declaration loads nothing and loses only its removed
+      // specifiers.
+      const node = path.node
+      if (
+        node.specifiers.length === 0 ||
+        (removedValue &&
+          node.importKind !== "type" &&
+          node.specifiers.every(
+            (specifier) =>
+              specifier.type === "ImportSpecifier" &&
+              specifier.importKind === "type",
+          ))
+      ) {
         path.remove()
       }
       return
@@ -110,85 +196,48 @@ export default function (
     if (path.isVariableDeclarator()) {
       let id = path.get("id")
       if (id.isIdentifier()) {
-        if (shouldBeRemoved(id) && !callsInFunction(path)) {
+        if (shouldBeRemoved(id) && !localCalls(path)) {
           willRemove()
+          const again = redeclarations(getDeclaredBinding(id)!)
           path.remove()
+          for (const redeclaration of again) redeclaration.remove()
         }
-      } else if (id.isObjectPattern() || id.isArrayPattern()) {
-        for (let variable of Pattern.findVariables(id)) {
+      } else {
+        // A parsed declarator binds an identifier or a pattern.
+        const pattern = id as NodePath<Babel.ObjectPattern | Babel.ArrayPattern>
+        for (let variable of Pattern.findVariables(pattern)) {
           // Keep unused variables that are filtered out of an object rest: in
           // `let { a, ...rest } = ...`, removing `a` would add it to `rest`.
           // This includes defaults and nested patterns, and takes precedence
           // over removable cycles.
-          if (Pattern.isRestFiltered(id.node, variable.node)) continue
+          if (Pattern.isRestFiltered(pattern.node, variable.node)) continue
           if (!shouldBeRemoved(variable)) continue
-          if (callsInFunction(path)) break
-
-          let parent = variable.parentPath
-
-          if (parent.isObjectProperty()) {
-            willRemove()
-            parent.remove()
-            continue
-          }
-
-          if (parent.isArrayPattern()) {
-            willRemove()
-            parent.node.elements[variable.key as number] = null
-            continue
-          }
-
-          if (parent.isAssignmentPattern()) {
-            if (t.isObjectProperty(parent.parent)) {
-              willRemove()
-              parent.parentPath?.remove()
-              continue
-            }
-            if (t.isArrayPattern(parent.parent)) {
-              willRemove()
-              parent.parent.elements[parent.key as number] = null
-              continue
-            }
-            throw unexpected(parent)
-          }
-
-          if (parent.isRestElement()) {
-            willRemove()
-            parent.remove()
-            continue
-          }
-
-          throw unexpected(parent)
+          if (localCalls(path)) break
+          markEmptied(variable)
+          willRemove()
+          // Keys that a removed rest no longer filters out may now go.
+          if (variable.parentPath.isRestElement()) reshapedPattern()
+          Pattern.remove(variable)
         }
       }
       return
     }
-    if (path.isObjectPattern()) {
-      if (path.node.properties.length !== 0) {
-        return
-      }
+    if (path.isObjectPattern() || path.isArrayPattern()) {
+      const node = path.node
+      const isEmpty = t.isObjectPattern(node)
+        ? node.properties.length === 0
+        : node.elements.every((element) => element === null)
+      if (!isEmpty) return
       let declarator = Pattern.findDeclarator(path)
       if (
         declarator &&
-        !Pattern.isRestFiltered(declarator.node.id, path.node) &&
-        !callsInFunction(declarator)
+        !Pattern.isRestFiltered(declarator.node.id, node) &&
+        !localCalls(declarator) &&
+        (!hasCandidates || emptied.has(node))
       ) {
         willRemove()
-        Pattern.remove(path)
-      }
-      return
-    }
-    if (path.isArrayPattern()) {
-      if (!path.node.elements.every((element) => element === null)) {
-        return
-      }
-      let declarator = Pattern.findDeclarator(path)
-      if (
-        declarator &&
-        !Pattern.isRestFiltered(declarator.node.id, path.node) &&
-        !callsInFunction(declarator)
-      ) {
-        willRemove()
+        // Removing a nested pattern can empty the pattern that holds it.
+        if (!t.isVariableDeclarator(path.parent)) reshapedPattern()
         Pattern.remove(path)
       }
       return
@@ -201,7 +250,7 @@ export default function (
         for (let sibling of path.getAllPrevSiblings()) {
           if (
             sibling.isTSDeclareFunction() &&
-            sibling.node.id?.name === id.node.name
+            sibling.node.id!.name === id.node.name
           ) {
             sibling.remove()
           }
@@ -210,30 +259,75 @@ export default function (
       }
       return
     }
-    if (path.isClassDeclaration()) {
-      let id = path.get("id")
-      if (
-        id.isIdentifier() &&
-        shouldBeRemoved(id) &&
-        !hasDefinitionSideEffects(path)
-      ) {
-        willRemove()
-        path.remove()
-      }
-      return
+    // Only the declaration types in ELIMINATION_TYPES reach visit, so this
+    // is a class declaration.
+    const classPath = path as NodePath<Babel.ClassDeclaration>
+    let id = classPath.get("id")
+    if (
+      id.isIdentifier() &&
+      shouldBeRemoved(id) &&
+      !runsCode(classPath) &&
+      !localCalls(classPath)
+    ) {
+      willRemove()
+      classPath.remove()
     }
+  }
+
+  // Whether defining a class runs code is decided for every class before
+  // anything is removed: once a name the class reads loses its binding,
+  // Babel judges the read as one of a global, which may throw. A removal can
+  // drop a binding the class reads even when the name stays: Babel deletes a
+  // removed declaration's name by name, which can reach a same-named binding
+  // of an enclosing scope, such as a parameter or a module constant that a
+  // nested block redeclares.
+  const classRunsCode = new Map<Babel.Node, boolean>()
+  const runsCode = (path: NodePath<Babel.ClassDeclaration>): boolean => {
+    let result = classRunsCode.get(path.node)
+    if (result === undefined) {
+      result = classDeclarationRunsCode(path, options?.keepLocalCall)
+      classRunsCode.set(path.node, result)
+    }
+    return result
+  }
+
+  // Whether a declaration in a function evaluates a call that keeps it, also
+  // decided before anything is removed: the caller's predicate may read
+  // bindings that a removal makes Babel delete.
+  const localCallsDecided = new Map<Babel.Node, boolean>()
+  const localCalls = (
+    path: NodePath<Babel.VariableDeclarator | Babel.ClassDeclaration>,
+  ): boolean => {
+    let result = localCallsDecided.get(path.node)
+    if (result === undefined) {
+      result = callsInFunction(path, options?.keepLocalCall)
+      localCallsDecided.set(path.node, result)
+    }
+    return result
   }
 
   const crawl = mustCrawlProgram(ast)
   programPath = getProgramPath(ast)
   if (crawl) crawlProgram(programPath)
-  removableBindings = findRemovableBindings(programPath, isKept)
+  removableBindings = findRemovableBindings(
+    programPath,
+    isKept,
+    runsCode,
+    localCalls,
+  )
+  const typeExports = findTypeOnlyExports(programPath)
   // Collect the declaration and pattern paths in source order without a Babel
   // traversal (see walk.ts).
   forEachMatchingPath(
     programPath,
     (node) => ELIMINATION_TYPES.has(node.type),
-    (path) => paths.push(path),
+    (path) => {
+      paths.push(path)
+      if (path.isClassDeclaration()) {
+        runsCode(path)
+        localCalls(path)
+      } else if (path.isVariableDeclarator()) localCalls(path)
+    },
   )
 
   // Elimination only removes nodes. Revisit the declaration paths in source
@@ -245,38 +339,63 @@ export default function (
         visit(path)
       }
     }
-    if (!needsAnotherPass) break
+    if (!removedAny) break
+    removedAny = false
+    // Refresh even when no pass follows, so the bindings match the output.
+    const lostReference = refreshBindings(snapshot!)
+    if (!needsAnotherPass && !lostReference) break
     needsAnotherPass = false
-    refreshBindings(snapshot!)
-    removableBindings = findRemovableBindings(programPath, isKept)
+    removableBindings = findRemovableBindings(
+      programPath,
+      isKept,
+      runsCode,
+      localCalls,
+    )
+    removableLocals.clear()
+  }
+
+  // A type-only export keeps no value alive, but once the value is gone it
+  // names nothing, which TypeScript parsers reject. It stays while a type of
+  // that name does (`type s = ...` next to `const s`).
+  for (const { specifier, binding } of typeExports) {
+    if (programPath.scope.bindings[binding.identifier.name] === binding)
+      continue
+    if (binding.referencePaths.some(isSameNamedType)) continue
+    const declaration =
+      specifier.parentPath as NodePath<Babel.ExportNamedDeclaration>
+    // Removing the specifier's path would make Babel delete its exported
+    // name from scope, which can be another binding's
+    // (`export type { s as t }`), so it leaves the list directly.
+    const specifiers = declaration.node.specifiers
+    specifiers.splice(specifiers.indexOf(specifier.node), 1)
+    if (specifiers.length === 0) declaration.remove()
   }
 }
 
-/**
- * Whether a declarator inside a function initializes its bindings with a call.
- * Such calls run on every invocation, and some must run in the same order in
- * every build: removing an unused `const id = useId()` from a component only in
- * the server build shifts React's hook-based ids. Declarations like these are
- * kept even when their bindings are unused.
- */
-function callsInFunction(path: NodePath<Babel.VariableDeclarator>): boolean {
-  let init = path.node.init
-  while (
-    t.isAwaitExpression(init) ||
-    t.isParenthesizedExpression(init) ||
-    t.isTSAsExpression(init) ||
-    t.isTSSatisfiesExpression(init) ||
-    t.isTSNonNullExpression(init) ||
-    t.isTSTypeAssertion(init) ||
-    t.isTypeCastExpression(init)
-  ) {
-    init = t.isAwaitExpression(init) ? init.argument : init.expression
-  }
-  return (
-    (t.isCallExpression(init) ||
-      t.isOptionalCallExpression(init) ||
-      t.isNewExpression(init) ||
-      t.isTaggedTemplateExpression(init)) &&
-    path.getFunctionParent() !== null
-  )
+/** Top-level type-only export specifiers of local bindings, with their binding. */
+function findTypeOnlyExports(programPath: NodePath<Babel.Program>) {
+  const result: Array<{
+    specifier: NodePath<Babel.ExportSpecifier>
+    binding: Binding
+  }> = []
+  programPath.node.body.forEach((statement, i) => {
+    if (statement.type !== "ExportNamedDeclaration" || statement.source) return
+    if (statement.specifiers.length === 0) return
+    const path = programPath.get(
+      `body.${i}`,
+    ) as NodePath<Babel.ExportNamedDeclaration>
+    for (const specifier of path.get("specifiers")) {
+      if (!specifier.isExportSpecifier() || !isTypeOnlyExport(specifier))
+        continue
+      const binding = programPath.scope.bindings[specifier.node.local.name]
+      if (binding) result.push({ specifier, binding })
+    }
+  })
+  return result
 }
+
+/** Whether a reference is the name of a same-named type alias or interface. */
+const isSameNamedType = (path: NodePath): boolean =>
+  path.key === "id" &&
+  (path.parent.type === "TSTypeAliasDeclaration" ||
+    path.parent.type === "TSInterfaceDeclaration")

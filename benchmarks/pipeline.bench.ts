@@ -1,4 +1,5 @@
-import { bench, describe } from "vitest"
+import { describe } from "vitest"
+import { bench } from "./consuming"
 import { pipeline, workloads } from "./workloads"
 
 // Parse, reference analysis, transform, elimination and generation, as

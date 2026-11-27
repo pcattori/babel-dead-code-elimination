@@ -107,6 +107,87 @@ const startup = initializeApplication()
 
 `greeting` was referenced before the custom transform and became unused afterward, so it can be removed. `startup` was already unused, so it is preserved along with its potentially side-effectful initializer.
 
+### Choose which calls keep a declaration inside a function
+
+Inside a function, `deadCodeElimination` keeps an unused declaration whose
+initializer calls something, such as `const id = useId()`: removing it from
+one build only (for example the server build) can change which hooks run and
+break hydration. By default every call counts, including calls that only
+fetch data. Pass `keepLocalCall` to decide which calls keep their
+declaration. It receives the paths of the calls, `new` expressions, tagged
+templates and applied decorators that a declaration inside a function
+evaluates, in source order until it accepts one (the declaration is then
+kept), before anything is removed:
+
+```ts
+import { deadCodeElimination } from "babel-dead-code-elimination"
+
+const isHookName = (name: string) => /^use[A-Z]/.test(name)
+
+export function transform(ast: AST) {
+  deadCodeElimination(ast, undefined, {
+    keepLocalCall: (call) => {
+      const node = call.node
+      const callee =
+        node.type === "Decorator"
+          ? node.expression
+          : node.type === "TaggedTemplateExpression"
+            ? node.tag
+            : node.callee
+      // `useId()`, `React.useState()`, `React?.useState()`,
+      // `store?.useSelector()`
+      return (
+        (callee.type === "Identifier" && isHookName(callee.name)) ||
+        ((callee.type === "MemberExpression" ||
+          callee.type === "OptionalMemberExpression") &&
+          callee.property.type === "Identifier" &&
+          isHookName(callee.property.name))
+      )
+    },
+  })
+}
+```
+
+For example:
+
+```ts
+// Before
+export function Page() {
+  const id = useId()
+  const user = getSession().user
+  return <Profile id={id} />
+}
+
+// After, with the hook rule above
+export function Page() {
+  const id = useId()
+  return <Profile id={id} />
+}
+```
+
+With the option, a class declaration inside a function is judged like a
+class expression (`const Repo = class { ... }`): only a call the option
+accepts keeps it, not other code its definition runs, so
+`class Repo { static { db.connect() } }` goes under the hook rule above.
+
+The second argument still takes the candidates, or `undefined` for none.
+
+When you collect candidates first, pass the same option to
+`findReferencedIdentifiers` (or `collectReferencedIdentifiers`):
+
+```ts
+const options = { keepLocalCall }
+const referenced = findReferencedIdentifiers(ast, options)
+// ... your transform ...
+deadCodeElimination(ast, referenced, options)
+```
+
+The collectors then decide which locals are used by the same rule. Without
+it, a local that only its own rejected call keeps alive, such as `session`
+in `const session = getSession(refresh); function refresh() { return session }`,
+would be in the set, and elimination would remove it although your
+transform did not make it unused.
+
 ### Reuse scopes from an earlier traversal
 
 If a read-only Babel traversal has already initialized scopes, pass
@@ -164,6 +245,49 @@ AST. If the analysis finds no transformation, discard the function to avoid
 reference-graph analysis. The optional `scopeIsFresh` flag follows the same
 contract as `findReferencedIdentifiers`; otherwise the collector refreshes
 scopes before your visitor runs.
+
+## Limitations
+
+- **`eval` is not supported.** Code that a direct `eval` reads is invisible to
+  the analysis, so `const x = 1; eval("x")` removes `x`.
+- **Types are not cleaned up.** References inside TypeScript types (`typeof x`,
+  `x as typeof schema`, `implements X`, `{ [key]: T }`, `export type { x }`) do
+  not keep a value alive, because types are erased before the code runs. The
+  types themselves stay, so the output can contain a type that names a removed
+  value, such as `type T = typeof schema`. Only a type-only export of a removed
+  value goes with it, and a value import that elimination leaves with only
+  type specifiers (`import { type User } from "./db.server"`); an
+  `import type` declaration loses only the specifiers elimination removes.
+  Strip types before type-checking the output, or do not type-check it.
+- **The classic JSX runtime's import is not kept by JSX.** With the classic
+  runtime, `<div />` compiles to `React.createElement("div")`, but before that
+  compilation the module reads `React` nowhere, so `import React from "react"`
+  is removed when only JSX would use it. Run elimination after the JSX
+  transform, use the automatic runtime, or read the import in code.
+- **Legacy decorators are not supported.** Only standard decorators keep an
+  unused class: on the class, on a method with a body, on an accessor, and on
+  a field that is neither `declare` nor abstract. A decorator that only
+  TypeScript's `experimentalDecorators` allows, such as one on a parameter
+  (`constructor(@Inject(Token) dep: Dep)`), counts for nothing, so a class
+  that nothing reads is removed with it. A member without a body (a `declare`
+  field, an abstract member, an overload signature) is erased with its
+  decorators and computed key, so `declare [register()]: T` runs nothing
+  either.
+- **A name read only in types is never a candidate.** `findReferencedIdentifiers`
+  leaves out a name that only types read, so it stays when your transform
+  removes the code holding those type reads, as everything does that was
+  already unused: in
+  `import { UserRecord } from "./models.server"` with
+  `createServerFn().handler(async () => load<UserRecord>())`, stripping the
+  handler keeps the import. Remove such imports yourself, or strip types
+  first.
+- **A dead cycle that your transform cuts stays.** `findReferencedIdentifiers`
+  leaves out names that only read each other in a closed cycle, such as `x` and
+  `foo` in `const x = createServerFn().handler(() => foo()); const foo = () => x`.
+  If your transform then strips `x`'s handler, `foo` was never a candidate, so
+  `deadCodeElimination(ast, referenced)` keeps it. A destructured name read only
+  by its own default (`const { handler = () => handler() } = config`) and a
+  variable reassigned only by code that it keeps alive count as such cycles.
 
 ## Prior art
 

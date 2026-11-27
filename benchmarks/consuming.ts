@@ -1,10 +1,30 @@
-import { bench } from "vitest"
+import { test } from "vitest"
+
+/**
+ * Registers a benchmark as its own test, through Vitest's `bench` fixture.
+ * `options` are tinybench run options, such as a fixed iteration count.
+ */
+export function bench(
+  name: string,
+  fn: () => void,
+  options: {
+    beforeEach?: () => void
+    iterations?: number
+    warmupIterations?: number
+  } = {},
+) {
+  let { beforeEach, ...run } = options
+  test(name, async ({ bench }) => {
+    let fixed =
+      run.iterations === undefined ? {} : { time: 0, warmupTime: 0, ...run }
+    await bench(name, beforeEach ? { beforeEach } : {}, fn).run(fixed)
+  })
+}
 
 /**
  * Benchmarks an operation that consumes its input, such as elimination
- * mutating an AST. Vitest does not forward tinybench's per-iteration hooks, so
- * each warmup and run cycle prepares a fixed number of inputs in the `setup`
- * hook, outside the timed loop.
+ * mutating an AST. Each iteration gets a fresh input, prepared in tinybench's
+ * `beforeEach` hook, outside the timed function.
  */
 export function benchConsuming<T>(
   name: string,
@@ -12,17 +32,13 @@ export function benchConsuming<T>(
   run: (input: T) => void,
   iterations: number,
 ) {
-  let inputs: T[] = []
-  let warmupIterations = Math.max(4, Math.round(iterations / 4))
-  bench(name, () => run(inputs.pop() ?? prepare()), {
-    time: 0,
-    iterations,
-    warmupTime: 0,
-    warmupIterations,
-    setup: (_task, mode) => {
-      let count = mode === "warmup" ? warmupIterations : iterations
-      inputs = Array.from({ length: count }, prepare)
+  let input: T
+  bench(name, () => run(input), {
+    beforeEach: () => {
+      input = prepare()
     },
+    iterations,
+    warmupIterations: Math.max(4, Math.round(iterations / 4)),
   })
 }
 

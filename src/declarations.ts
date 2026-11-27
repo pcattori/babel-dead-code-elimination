@@ -24,12 +24,16 @@ export function forEachDeclaredIdentifier(
     const id = path.get("id")
     if (id.isIdentifier()) {
       identifier(id)
-    } else if (id.isObjectPattern() || id.isArrayPattern()) {
-      for (const variable of Pattern.findVariables(id)) {
+    } else {
+      // A parsed declarator binds an identifier or a pattern.
+      const pattern = id as NodePath<Babel.ObjectPattern | Babel.ArrayPattern>
+      for (const variable of Pattern.findVariables(pattern)) {
         identifier(variable)
       }
     }
-  } else if (path.isFunctionDeclaration() || path.isClassDeclaration()) {
+  } else {
+    // Only DECLARATION_TYPES reach here, so this is a function or class
+    // declaration, whose id is missing in `export default function () {}`.
     const id = path.get("id") as NodePath
     if (id.isIdentifier()) {
       identifier(id)

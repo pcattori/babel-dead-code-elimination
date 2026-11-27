@@ -103,6 +103,17 @@ test("circular references", () => {
   expect(findReferencedNames(source)).toStrictEqual([])
 })
 
+test("names read only by unused declarations stay referenced", () => {
+  // A transform that strips the handler makes `foo` and `db` unused, so
+  // elimination with this set can remove them afterwards.
+  let source = dedent`
+    import { db } from "./db.server"
+    const x = createServerFn().handler(() => foo())
+    const foo = () => db.query()
+  `
+  expect(findReferencedNames(source).sort()).toStrictEqual(["db", "foo"])
+})
+
 test("fresh scopes preserve nested and duplicate declaration identities", () => {
   const ast = parse(
     `
@@ -140,4 +151,41 @@ test("default collection refreshes references introduced by AST plugins", () => 
   expect(
     [...findReferencedIdentifiers(ast)].map((path) => path.node.name),
   ).toEqual(["value", "answer"])
+})
+
+test("an element read only by its own default is not referenced", () => {
+  let source = dedent`
+    const { handler = () => handler(), other } = config
+    export const page = () => other
+  `
+  expect(findReferencedNames(source).sort()).toStrictEqual(["other", "page"])
+})
+
+test("an element before a kept rest that reads itself is referenced", () => {
+  let source = dedent`
+    const { handler = () => handler(), ...rest } = config
+    use(rest)
+  `
+  expect(findReferencedNames(source).sort()).toStrictEqual(["handler", "rest"])
+})
+
+test("a variable reassigned only by code that it keeps is not referenced", () => {
+  let source = dedent`
+    let cache = memo(() => refresh)
+    function refresh() { cache = load(cache) }
+  `
+  expect(findReferencedNames(source)).toStrictEqual([])
+})
+
+test("locals that only read each other are not referenced", () => {
+  let source = dedent`
+    export function f() {
+      const a = () => b()
+      const b = () => a()
+      const c = () => c()
+      const d = () => 1
+      return d
+    }
+  `
+  expect(findReferencedNames(source)).toStrictEqual(["f", "d"])
 })

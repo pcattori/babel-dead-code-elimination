@@ -9,36 +9,62 @@ import type { Visitor } from "@babel/traverse"
 import { crawlProgram, mustCrawlProgram } from "./scope"
 import { forEachMatchingPath, getProgramPath } from "./walk"
 import { DECLARATION_TYPES, forEachDeclaredIdentifier } from "./declarations"
-import findRemovableBindings, {
+import {
+  findDeadCycleBindings,
   getDeclaredBinding,
   isReferenced,
+  type KeepLocalCall,
 } from "./find-removable-bindings"
 
 type IdentifierPath = NodePath<Babel.Identifier>
 type ScopeOptions = {
   /** The AST has not changed since Babel last built its scopes. */
   scopeIsFresh?: boolean
+  /**
+   * The same predicate given to `deadCodeElimination`: a local inside a
+   * function whose only use is a call the predicate rejects is as unused as
+   * elimination finds it, so the set holds no cycle that such a call alone
+   * keeps alive. See DeadCodeEliminationOptions.
+   */
+  keepLocalCall?: KeepLocalCall
 }
 
+// A name is referenced when something reads it, unless only its own closed
+// dead cycle does: nothing a transform removes can make such a cycle unused.
+// Cycles are found within each scope, so locals that only read each other
+// count as unused like such module declarations (decision R2-D5).
 function addIfReferenced(
   ident: IdentifierPath,
-  removable: Set<Binding>,
+  deadCycles: DeadCycles,
   referenced: Set<IdentifierPath>,
 ): void {
   const binding = getDeclaredBinding(ident)
-  if (binding && !removable.has(binding) && isReferenced(binding)) {
+  if (binding && isReferenced(binding) && !deadCycles(binding)) {
     referenced.add(ident)
   }
 }
 
+type DeadCycles = (binding: Binding) => boolean
+
+/** Whether a binding is in a closed dead cycle of its scope, scope by scope. */
+function deadCyclesByScope(keep: KeepLocalCall | undefined): DeadCycles {
+  const byScope = new Map<Binding["scope"], Set<Binding>>()
+  return (binding) => {
+    let cycles = byScope.get(binding.scope)
+    if (!cycles) {
+      cycles = findDeadCycleBindings(binding.scope.path, keep)
+      byScope.set(binding.scope, cycles)
+    }
+    return cycles.has(binding)
+  }
+}
+
 function declarationVisitor(
-  program: (path: NodePath<Babel.Program>) => void,
   identifier: (path: IdentifierPath) => void,
 ): Visitor {
   const declaration = (path: NodePath) =>
     forEachDeclaredIdentifier(path, identifier)
   return {
-    Program: program,
     ImportDeclaration: declaration,
     VariableDeclarator: declaration,
     FunctionDeclaration: declaration,
@@ -56,14 +82,14 @@ export default function (
   if (crawl) {
     crawlProgram(programPath)
   }
-  const removable = findRemovableBindings(programPath)
+  const deadCycles = deadCyclesByScope(options?.keepLocalCall)
   // Declarations are found without a second Babel traversal (see walk.ts).
   forEachMatchingPath(
     programPath,
     (node) => DECLARATION_TYPES.has(node.type),
     (path) =>
       forEachDeclaredIdentifier(path, (ident) =>
-        addIfReferenced(ident, removable, referenced),
+        addIfReferenced(ident, deadCycles, referenced),
       ),
   )
   return referenced
@@ -81,13 +107,7 @@ export function collectReferencedIdentifiers(
   options: ScopeOptions & { visitor: Visitor },
 ): () => Set<IdentifierPath> {
   const identifiers: Array<IdentifierPath> = []
-  let programPath!: NodePath<Babel.Program>
-  const visitor = declarationVisitor(
-    (path) => {
-      programPath = path
-    },
-    (ident) => identifiers.push(ident),
-  )
+  const visitor = declarationVisitor((ident) => identifiers.push(ident))
   if (!options.scopeIsFresh && mustCrawlProgram(ast)) {
     visitor.enter = (path) => {
       // File traversal starts at Program. Restore the supplied generic callbacks
@@ -100,9 +120,9 @@ export function collectReferencedIdentifiers(
   traverse(ast, mergedVisitor)
   return () => {
     const referenced = new Set<IdentifierPath>()
-    const removable = findRemovableBindings(programPath)
+    const deadCycles = deadCyclesByScope(options.keepLocalCall)
     for (const ident of identifiers) {
-      addIfReferenced(ident, removable, referenced)
+      addIfReferenced(ident, deadCycles, referenced)
     }
     return referenced
   }
