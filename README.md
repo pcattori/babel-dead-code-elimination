@@ -163,6 +163,12 @@ export function Page() {
 
 The second argument still takes the candidates, or `undefined` for none.
 
+`findReferencedIdentifiers` and `collectReferencedIdentifiers` do not take
+`keepLocalCall`: they count every call, so the set they return is the same
+whichever rule you pass to `deadCodeElimination`. The option only decides, in
+`deadCodeElimination`, which calls keep an unused declaration inside a
+function.
+
 ### Reuse scopes from an earlier traversal
 
 If a read-only Babel traversal has already initialized scopes, pass
@@ -244,7 +250,10 @@ scopes before your visitor runs.
   a field that is neither `declare` nor abstract. A decorator that only
   TypeScript's `experimentalDecorators` allows, such as one on a parameter
   (`constructor(@Inject(Token) dep: Dep)`), counts for nothing, so a class
-  that nothing reads is removed with it.
+  that nothing reads is removed with it. A member without a body (a `declare`
+  field, an abstract member, an overload signature) is erased with its
+  decorators and computed key, so `declare [register()]: T` runs nothing
+  either.
 - **A name read only in types is never a candidate.** `findReferencedIdentifiers`
   leaves out a name that only types read, so it stays when your transform
   removes the code holding those type reads, as everything does that was
