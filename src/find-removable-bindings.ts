@@ -58,10 +58,23 @@ export default function findRemovableBindings(
  * reassignment counts as a reference from the code doing it, so an element
  * that only its own default reads, or a variable that only code it keeps
  * reassigns, is in a closed cycle.
+ * @param keep - The caller's `keepLocalCall`, which decides, as in
+ * elimination, which calls keep a local in a function live.
  */
-export function findDeadCycleBindings(scopePath: NodePath): Set<Binding> {
+export function findDeadCycleBindings(
+  scopePath: NodePath,
+  keep?: KeepLocalCall,
+): Set<Binding> {
   const removable = new Set<Binding>()
-  const graph = buildReferenceGraph(scopePath)
+  // With the caller's keepLocalCall, a local's calls keep it live exactly
+  // when elimination keeps it for them (decision R4-D1).
+  const graph = buildReferenceGraph(
+    scopePath,
+    undefined,
+    false,
+    (path) => classDeclarationRunsCode(path, keep),
+    (path) => callsInFunction(path, keep),
+  )
   if (!graph) return removable
   const { bindings, refs, excluded } = graph
   const n = bindings.length

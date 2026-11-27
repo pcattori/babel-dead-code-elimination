@@ -5,7 +5,11 @@ import generate from "@babel/generator"
 import ts from "dedent"
 
 import { traverse, t, type Babel, type NodePath } from "./babel-esm"
-import { deadCodeElimination, findReferencedIdentifiers } from "./index"
+import {
+  collectReferencedIdentifiers,
+  deadCodeElimination,
+  findReferencedIdentifiers,
+} from "./index"
 
 // Regression tests for elimination defects that could leave dangling
 // references, change semantics, crash, or keep unused code.
@@ -1187,6 +1191,42 @@ describe("keepLocalCall", () => {
 
   test("keeps every call without the option", () => {
     expect(eliminate()).toBe(unchanged(source))
+  })
+
+  test("the README workflow with the option and no transform changes nothing", () => {
+    let code = ts`
+      import { getSession } from "./auth.server"
+      export function Page() {
+        const session = getSession(refresh)
+        function refresh() { return session }
+        return 1
+      }
+    `
+    let ast = parseModule(code)
+    let referenced = findReferencedIdentifiers(ast, { keepLocalCall: hookRule })
+    // `getSession` has a reader, unread code that elimination removes.
+    expect([...referenced].map((p) => p.node.name).sort()).toEqual([
+      "Page",
+      "getSession",
+    ])
+    deadCodeElimination(ast, referenced, { keepLocalCall: hookRule })
+    expect(generate(ast).code).toBe(unchanged(code))
+
+    let collected = collectReferencedIdentifiers(parseModule(code), {
+      visitor: {},
+      keepLocalCall: hookRule,
+    })()
+    expect([...collected].map((p) => p.node.name).sort()).toEqual([
+      "Page",
+      "getSession",
+    ])
+    let everyCall = findReferencedIdentifiers(parseModule(code))
+    expect([...everyCall].map((p) => p.node.name).sort()).toEqual([
+      "Page",
+      "getSession",
+      "refresh",
+      "session",
+    ])
   })
 
   test.each([

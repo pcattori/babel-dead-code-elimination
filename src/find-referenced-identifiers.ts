@@ -13,12 +13,20 @@ import {
   findDeadCycleBindings,
   getDeclaredBinding,
   isReferenced,
+  type KeepLocalCall,
 } from "./find-removable-bindings"
 
 type IdentifierPath = NodePath<Babel.Identifier>
 type ScopeOptions = {
   /** The AST has not changed since Babel last built its scopes. */
   scopeIsFresh?: boolean
+  /**
+   * The same predicate given to `deadCodeElimination`: a local inside a
+   * function whose only use is a call the predicate rejects is as unused as
+   * elimination finds it, so the set holds no cycle that such a call alone
+   * keeps alive. See DeadCodeEliminationOptions.
+   */
+  keepLocalCall?: KeepLocalCall
 }
 
 // A name is referenced when something reads it, unless only its own closed
@@ -39,12 +47,12 @@ function addIfReferenced(
 type DeadCycles = (binding: Binding) => boolean
 
 /** Whether a binding is in a closed dead cycle of its scope, scope by scope. */
-function deadCyclesByScope(): DeadCycles {
+function deadCyclesByScope(keep: KeepLocalCall | undefined): DeadCycles {
   const byScope = new Map<Binding["scope"], Set<Binding>>()
   return (binding) => {
     let cycles = byScope.get(binding.scope)
     if (!cycles) {
-      cycles = findDeadCycleBindings(binding.scope.path)
+      cycles = findDeadCycleBindings(binding.scope.path, keep)
       byScope.set(binding.scope, cycles)
     }
     return cycles.has(binding)
@@ -74,7 +82,7 @@ export default function (
   if (crawl) {
     crawlProgram(programPath)
   }
-  const deadCycles = deadCyclesByScope()
+  const deadCycles = deadCyclesByScope(options?.keepLocalCall)
   // Declarations are found without a second Babel traversal (see walk.ts).
   forEachMatchingPath(
     programPath,
@@ -112,7 +120,7 @@ export function collectReferencedIdentifiers(
   traverse(ast, mergedVisitor)
   return () => {
     const referenced = new Set<IdentifierPath>()
-    const deadCycles = deadCyclesByScope()
+    const deadCycles = deadCyclesByScope(options.keepLocalCall)
     for (const ident of identifiers) {
       addIfReferenced(ident, deadCycles, referenced)
     }

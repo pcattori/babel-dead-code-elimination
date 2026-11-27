@@ -168,11 +168,21 @@ accepts keeps it, not other code its definition runs, so
 
 The second argument still takes the candidates, or `undefined` for none.
 
-`findReferencedIdentifiers` and `collectReferencedIdentifiers` do not take
-`keepLocalCall`: they count every call, so the set they return is the same
-whichever rule you pass to `deadCodeElimination`. The option only decides, in
-`deadCodeElimination`, which calls keep an unused declaration inside a
-function.
+When you collect candidates first, pass the same option to
+`findReferencedIdentifiers` (or `collectReferencedIdentifiers`):
+
+```ts
+const options = { keepLocalCall }
+const referenced = findReferencedIdentifiers(ast, options)
+// ... your transform ...
+deadCodeElimination(ast, referenced, options)
+```
+
+The collectors then decide which locals are used by the same rule. Without
+it, a local that only its own rejected call keeps alive, such as `session`
+in `const session = getSession(refresh); function refresh() { return session }`,
+would be in the set, and elimination would remove it although your
+transform did not make it unused.
 
 ### Reuse scopes from an earlier traversal
 
