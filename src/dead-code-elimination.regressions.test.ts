@@ -469,6 +469,23 @@ describe("missed eliminations", () => {
     ["var x = a\nvar x\nexport const z = 1", "export const z = 1;"],
     ["var x = a\nvar x = b\nexport const z = 1", "export const z = 1;"],
     ["var x = a\nvar x\nuse(x)", "var x = a;\nvar x;\nuse(x);"],
+    [
+      "var x = a\nif (k) var x\nexport const z = 1",
+      "if (k) {}\nexport const z = 1;",
+    ],
+    [
+      "var x = a\nswitch (k) { case 1: var x }\nexport const z = 1",
+      "switch (k) {\n  case 1:\n}\nexport const z = 1;",
+    ],
+    ["var x = a\nL: var x\nexport const z = 1", "export const z = 1;"],
+    [
+      "var x = a\nwhile (k) var x\nexport const z = 1",
+      "while (k) {}\nexport const z = 1;",
+    ],
+    [
+      "var x = a\nfor (var x of xs) {}\nexport const z = 1",
+      "var x = a;\nfor (var x of xs) {}\nexport const z = 1;",
+    ],
   ])(
     "removes an unused var with its redeclarations: %s",
     (source, expected) => {

@@ -581,8 +581,18 @@ export function redeclarations(
     (path): path is NodePath<Babel.VariableDeclarator> =>
       path.isVariableDeclarator() &&
       t.isIdentifier(path.node.id) &&
-      path.parentPath.listKey === "body",
+      !isLoopHead(path.parentPath),
   )
+}
+
+/**
+ * Whether a declaration is a loop's head (`for (var x of y)`,
+ * `for (var x = 0; ...)`), not a statement, which can stand anywhere a
+ * statement can: in a block, a `switch` case, a label, or the braceless body
+ * of an `if` or a loop.
+ */
+function isLoopHead(declaration: NodePath): boolean {
+  return declaration.parentPath?.isFor() === true && declaration.key !== "body"
 }
 
 export function isLoopIteratorBinding(binding: Binding): boolean {
