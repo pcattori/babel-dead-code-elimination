@@ -1086,6 +1086,42 @@ describe("static field initializers", () => {
   )
 })
 
+describe("computed keys on members without a body", () => {
+  test.each([
+    ["a declare field", "class K { declare [hook()]: number }"],
+    ["an abstract method", "abstract class K { abstract [hook()](): void }"],
+    ["an abstract field", "abstract class K { abstract [hook()]: number }"],
+    ["an overload signature", "class K { [hook()](): void; m() {} }"],
+  ])("run nothing on %s", (_, cls) => {
+    let source = `${cls}\nexport const z = 1`
+    expect(transform(source, { candidates: "none", typescript: true })).toBe(
+      "export const z = 1;",
+    )
+  })
+
+  test("run on an implementation beside its overload", () => {
+    let source = ts`
+      class K { [hook()](p: number): void; [hook()](p?: any) {} }
+      export const z = 1
+    `
+    expect(
+      transform(source, { candidates: "none", typescript: true }),
+    ).toContain("class K")
+  })
+
+  test("keep no class expression inside a function", () => {
+    let source = ts`
+      export function F() {
+        const K = class { declare [hook()]: number }
+        return 0
+      }
+    `
+    expect(
+      transform(source, { candidates: "none", typescript: true }),
+    ).not.toContain("class")
+  })
+})
+
 describe("keepLocalCall", () => {
   let isHook = (name: string) => /^use[A-Z]/.test(name)
   let hookRule = (call: NodePath) => {

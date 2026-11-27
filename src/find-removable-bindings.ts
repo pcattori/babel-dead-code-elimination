@@ -532,7 +532,8 @@ const keepEveryCall: KeepLocalCall = () => true
  * a body, an accessor or a field that is neither `declare` nor abstract.
  * Legacy (`experimentalDecorators`) decorators are not supported, so a
  * decorator on a parameter, an overload signature, an abstract member or a
- * `declare` field counts for nothing.
+ * `declare` field counts for nothing. Such members are erased, so their
+ * computed keys run nothing either.
  */
 export function hasDefinitionSideEffects(
   path: NodePath<Babel.ClassDeclaration>,
@@ -542,6 +543,7 @@ export function hasDefinitionSideEffects(
   if (node.superClass && !isName(node.superClass)) return true
   for (const member of node.body.body) {
     if (t.isStaticBlock(member)) return true
+    if (isBodiless(member)) continue
     if (hasStandardDecorators(member)) return true
     if ("computed" in member && member.computed && !scope.isPure(member.key)) {
       return true
@@ -610,7 +612,8 @@ function classEvaluatesCall(
       (member) =>
         (member.isStaticBlock() && member.get("body").some(calls)) ||
         (hasStandardDecorators(member.node) && decoratorsCall(member, keep)) ||
-        (member.has("computed") &&
+        (!isBodiless(member.node) &&
+          member.has("computed") &&
           (member.node as { computed?: boolean }).computed === true &&
           calls(member.get("key") as NodePath<Babel.Node>)) ||
         ((member.isClassProperty() ||
@@ -641,11 +644,20 @@ function decoratorsCall(path: NodePath, keep: KeepLocalCall): boolean {
  */
 function hasStandardDecorators(member: Babel.Node): boolean {
   return (
-    "decorators" in member &&
-    !!member.decorators?.length &&
-    !t.isTSDeclareMethod(member) &&
-    !("declare" in member && member.declare === true) &&
-    !("abstract" in member && member.abstract === true)
+    "decorators" in member && !!member.decorators?.length && !isBodiless(member)
+  )
+}
+
+/**
+ * Whether a class member has no body: an overload signature, an abstract
+ * member or a `declare` field. Compilation erases it with its decorators and
+ * computed key, so defining the class runs neither.
+ */
+function isBodiless(member: Babel.Node): boolean {
+  return (
+    t.isTSDeclareMethod(member) ||
+    ("declare" in member && member.declare === true) ||
+    ("abstract" in member && member.abstract === true)
   )
 }
 
