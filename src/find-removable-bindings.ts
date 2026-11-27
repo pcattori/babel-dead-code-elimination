@@ -182,10 +182,10 @@ export function findDeadCycleBindings(
  */
 function buildReferenceGraph(
   scopePath: NodePath,
-  isKept?: (binding: Binding) => boolean,
-  forElimination = false,
-  classRunsCode: ClassRunsCode = hasDefinitionSideEffects,
-  localCalls: LocalCalls = callsInFunction,
+  isKept: ((binding: Binding) => boolean) | undefined,
+  forElimination: boolean,
+  classRunsCode: ClassRunsCode,
+  localCalls: LocalCalls,
 ):
   | { bindings: Binding[]; refs: (number[] | null)[]; excluded: Uint8Array }
   | undefined {
@@ -622,7 +622,7 @@ export function redeclarations(
  * of an `if` or a loop.
  */
 function isLoopHead(declaration: NodePath): boolean {
-  return declaration.parentPath?.isFor() === true && declaration.key !== "body"
+  return declaration.parentPath!.isFor() && declaration.key !== "body"
 }
 
 export function isLoopIteratorBinding(binding: Binding): boolean {
