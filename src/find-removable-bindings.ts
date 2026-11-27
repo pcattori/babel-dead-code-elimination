@@ -715,7 +715,8 @@ function isBodiless(member: Babel.Node): boolean {
  * unused `const id = useId()` from a component only in the server build
  * shifts React's hook-based ids. Declarations like these are kept even when
  * their bindings are unused. `keep` narrows the calls that count (the
- * caller's `keepLocalCall`); every call counts by default.
+ * caller's `keepLocalCall`); every call counts by default. It is called on
+ * the declaration's calls in source order until it accepts one.
  */
 export function callsInFunction(
   path: NodePath<Babel.VariableDeclarator | Babel.ClassDeclaration>,
@@ -724,8 +725,10 @@ export function callsInFunction(
   if (path.getFunctionParent() === null) return false
   return path.isClassDeclaration()
     ? classEvaluatesCall(path, keep)
-    : evaluatesCall(path.get("init") as NodePath<Babel.Node | null>, keep) ||
-        evaluatesCall(path.get("id") as NodePath<Babel.Node>, keep)
+    : // In source order: the pattern's defaults and computed keys, then the
+      // initializer (decision R4-D3).
+      evaluatesCall(path.get("id") as NodePath<Babel.Node>, keep) ||
+        evaluatesCall(path.get("init") as NodePath<Babel.Node | null>, keep)
 }
 
 function evaluatesCall(

@@ -114,9 +114,10 @@ initializer calls something, such as `const id = useId()`: removing it from
 one build only (for example the server build) can change which hooks run and
 break hydration. By default every call counts, including calls that only
 fetch data. Pass `keepLocalCall` to decide which calls keep their
-declaration. It receives the path of each call, `new`, tagged template and
-applied decorator that a declaration inside a function evaluates, before anything is
-removed:
+declaration. It receives the paths of the calls, `new` expressions, tagged
+templates and applied decorators that a declaration inside a function
+evaluates, in source order until it accepts one (the declaration is then
+kept), before anything is removed:
 
 ```ts
 import { deadCodeElimination } from "babel-dead-code-elimination"
@@ -133,9 +134,12 @@ export function transform(ast: AST) {
           : node.type === "TaggedTemplateExpression"
             ? node.tag
             : node.callee
+      // `useId()`, `React.useState()`, `React?.useState()`,
+      // `store?.useSelector()`
       return (
         (callee.type === "Identifier" && isHookName(callee.name)) ||
-        (callee.type === "MemberExpression" &&
+        ((callee.type === "MemberExpression" ||
+          callee.type === "OptionalMemberExpression") &&
           callee.property.type === "Identifier" &&
           isHookName(callee.property.name))
       )

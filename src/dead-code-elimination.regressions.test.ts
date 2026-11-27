@@ -1193,6 +1193,29 @@ describe("keepLocalCall", () => {
     expect(eliminate()).toBe(unchanged(source))
   })
 
+  test("receives a local's calls in source order until it accepts one", () => {
+    let code = ts`
+      export function Page() {
+        const { [key()]: a = useA() } = load(useB())
+        return 1
+      }
+    `
+    let seen = (accept: string) => {
+      let names: string[] = []
+      deadCodeElimination(parseModule(code), undefined, {
+        keepLocalCall: (call) => {
+          let callee = (call.node as Babel.CallExpression).callee
+          let name = (callee as Babel.Identifier).name
+          names.push(name)
+          return name === accept
+        },
+      })
+      return names
+    }
+    expect(seen("none")).toEqual(["key", "useA", "load", "useB"])
+    expect(seen("useA")).toEqual(["key", "useA"])
+  })
+
   test("the README workflow with the option and no transform changes nothing", () => {
     let code = ts`
       import { getSession } from "./auth.server"

@@ -34,10 +34,10 @@ export interface DeadCodeEliminationOptions {
    * Which calls keep an otherwise unused declaration inside a function. A
    * local whose declaration evaluates a call when it runs, such as
    * `const id = useId()`, is kept by default, since removing it from one
-   * build only could change which hooks run. The predicate receives each
-   * call, `new`, tagged template and applied decorator such a declaration
-   * evaluates, before anything is removed; the declaration is kept when it
-   * accepts one. A class declaration inside a function is then judged like a
+   * build only could change which hooks run. The predicate receives the
+   * calls, `new` expressions, tagged templates and applied decorators such a
+   * declaration evaluates, in source order until it accepts one, before
+   * anything is removed; the declaration is kept when it accepts one. A class declaration inside a function is then judged like a
    * class expression, by those calls alone: a static block or decorator whose
    * calls it rejects no longer keeps it. Without the option, every call keeps
    * its declaration.
