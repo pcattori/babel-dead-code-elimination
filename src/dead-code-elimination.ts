@@ -19,7 +19,7 @@ import {
 import findRemovableBindings, {
   callsInFunction,
   getDeclaredBinding,
-  hasDefinitionSideEffects,
+  classDeclarationRunsCode,
   isLoopIteratorBinding,
   isReferenced,
   isTypeOnlyExport,
@@ -37,7 +37,10 @@ export interface DeadCodeEliminationOptions {
    * build only could change which hooks run. The predicate receives each
    * call, `new`, tagged template and applied decorator such a declaration
    * evaluates, before anything is removed; the declaration is kept when it
-   * accepts one. Without it, every call keeps its declaration.
+   * accepts one. A class declaration inside a function is then judged like a
+   * class expression, by those calls alone: a static block or decorator whose
+   * calls it rejects no longer keeps it. Without the option, every call keeps
+   * its declaration.
    */
   keepLocalCall?: KeepLocalCall
 }
@@ -282,7 +285,7 @@ export default function (
   const runsCode = (path: NodePath<Babel.ClassDeclaration>): boolean => {
     let result = classRunsCode.get(path.node)
     if (result === undefined) {
-      result = hasDefinitionSideEffects(path)
+      result = classDeclarationRunsCode(path, options?.keepLocalCall)
       classRunsCode.set(path.node, result)
     }
     return result

@@ -161,6 +161,11 @@ export function Page() {
 }
 ```
 
+With the option, a class declaration inside a function is judged like a
+class expression (`const Repo = class { ... }`): only a call the option
+accepts keeps it, not other code its definition runs, so
+`class Repo { static { db.connect() } }` goes under the hook rule above.
+
 The second argument still takes the candidates, or `undefined` for none.
 
 `findReferencedIdentifiers` and `collectReferencedIdentifiers` do not take

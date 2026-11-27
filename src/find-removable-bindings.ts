@@ -552,6 +552,23 @@ export function hasDefinitionSideEffects(
   return false
 }
 
+/**
+ * Whether defining a class declaration keeps it when nothing reads it. With
+ * the caller's `keepLocalCall`, a class declaration inside a function is
+ * judged like a class expression local instead (decision R4-D2): by the
+ * calls it evaluates that the option accepts (see callsInFunction), not by
+ * other code its definition runs, so `class Repo { static { db.connect() } }`
+ * goes from a component when the option keeps only hooks. Everywhere else,
+ * and without the option, see hasDefinitionSideEffects.
+ */
+export function classDeclarationRunsCode(
+  path: NodePath<Babel.ClassDeclaration>,
+  keep?: KeepLocalCall,
+): boolean {
+  if (keep !== undefined && path.getFunctionParent() !== null) return false
+  return hasDefinitionSideEffects(path)
+}
+
 const isName = (node: Babel.Node): boolean =>
   t.isIdentifier(node) ||
   (t.isMemberExpression(node) && !node.computed && isName(node.object))

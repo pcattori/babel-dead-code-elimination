@@ -1189,6 +1189,29 @@ describe("keepLocalCall", () => {
     expect(eliminate()).toBe(unchanged(source))
   })
 
+  test.each([
+    "class Repo { static { db.connect() } }",
+    "class Repo { static { cache.n = 1 } }",
+    "class Repo { [cache.key]() {} }",
+    "@register class Repo {}",
+  ])(
+    "judges a class declaration in a function like a class expression: %s",
+    (cls) => {
+      let code = `import { db } from "./db.server"\nexport function Page() {\n  ${cls}\n  const id = useId()\n  return id\n}`
+      let ast = parseModule(code)
+      deadCodeElimination(ast, undefined, { keepLocalCall: hookRule })
+      expect(generate(ast).code).toBe(ts`
+        export function Page() {
+          const id = useId();
+          return id;
+        }
+      `)
+      let kept = parseModule(code)
+      deadCodeElimination(kept)
+      expect(generate(kept).code).toContain("class Repo")
+    },
+  )
+
   test("receives each call and applied decorator, before any removal", () => {
     let seen: string[] = []
     let ast = parseModule(ts`
