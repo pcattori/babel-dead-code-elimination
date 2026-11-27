@@ -423,7 +423,7 @@ function filteringRests(
   target: Babel.Node,
   rests: Babel.Node[] = [],
 ): Babel.Node[] | undefined {
-  if (!node) return undefined
+  // A hole (null) is neither the target nor a pattern, so it finds nothing.
   if (node === target) return rests
   if (t.isObjectPattern(node)) {
     const last = node.properties.at(-1)

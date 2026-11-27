@@ -46,7 +46,6 @@ function forgetNestedScopes(program: Babel.Program): void {
  * without crawling again.
  */
 export type BindingSnapshot = {
-  programPath: NodePath<Babel.Program>
   /** Bindings of the declarations elimination considers, in all scopes. */
   declared: Array<{ identifier: NodePath<Babel.Identifier>; binding: Binding }>
   /**
@@ -100,7 +99,7 @@ export function snapshotBindings(
       if (!declaredBindings.has(binding)) retained.push([scope, name, binding])
     }
   }
-  return { programPath, declared, retained }
+  return { declared, retained }
 }
 
 /**
